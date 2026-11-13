@@ -1,0 +1,32 @@
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+def newBuildDir = rootProject.layout.buildDirectory.dir('../../build').get()
+rootProject.layout.buildDirectory.value(newBuildDir)
+
+subprojects {
+    def newSubprojectBuildDir = newBuildDir.dir(project.name)
+    project.layout.buildDirectory.value(newSubprojectBuildDir)
+
+    // androidx releases resolved by Flutter plugins (e.g. fragment 1.7.1)
+    // require compiling against API 34+; the Flutter template default is 33.
+    // Force a floor on every Android module in this build.
+    afterEvaluate {
+        if (project.plugins.hasPlugin('com.android.application') ||
+                project.plugins.hasPlugin('com.android.library')) {
+            android {
+                compileSdk = Math.max(compileSdk, 36)
+            }
+        }
+    }
+
+    project.evaluationDependsOn(':app')
+}
+
+tasks.register('clean', Delete) {
+    delete rootProject.layout.buildDirectory
+}

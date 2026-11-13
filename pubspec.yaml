@@ -1,0 +1,56 @@
+name: music_player
+description: Offline-first cross-platform music player and library manager.
+publish_to: "none"
+version: 0.1.0
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State management
+  flutter_riverpod: ^2.5.1
+
+  # Database
+  drift: ^2.18.0
+  sqlite3_flutter_libs: ^0.5.22
+  path: ^1.9.0
+  path_provider: ^2.1.4
+
+  # Audio playback
+  just_audio: ^0.10.2
+  audio_service: ^0.18.19
+  audio_session: ^0.1.2
+
+  # File handling
+  file_picker: ^8.1.6
+  desktop_drop: ^0.4.4
+  crypto: ^3.0.3
+
+  # Networking / serialization
+  dio: ^5.7.0
+  json_serializable: ^6.8.0
+
+  # Platform services
+  permission_handler: ^11.3.1
+  connectivity_plus: ^6.0.3
+  device_info_plus: ^10.1.2
+  tray_manager: ^0.2.3
+
+  # Utilities
+  logger: ^2.4.0
+  uuid: ^4.4.1
+  intl: ^0.19.0
+  image: ^4.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  drift_dev: ^2.18.0
+  build_runner: ^2.4.11
+
+flutter:
+  uses-material-design: true
