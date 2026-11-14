@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:music_player/app/app.dart';
 import 'package:music_player/app/bootstrap.dart';
 import 'package:music_player/core/constants/app_constants.dart';
+import 'package:music_player/features/diagnostics/presentation/diagnostics_screen.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -222,6 +223,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                 : null,
             onTap: _busy ? null : _restoreBackup,
+          ),
+          const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('Troubleshooting', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+          ListTile(
+            title: const Text('Diagnostics'),
+            subtitle: const Text(
+                'Export a report, test the YouTube connection, inspect logs'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const DiagnosticsScreen())),
           ),
           const Padding(
             padding: EdgeInsets.all(16),

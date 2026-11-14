@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.3
+
+### Fixes
+- **YouTube 400 errors**: the resolver now rotates through known-good
+  Android client versions with backoff when YouTube rejects a request
+  (HTTP 400 is how YouTube's edge servers signal a stale client version),
+  remembers whichever version works for the session, and surfaces
+  YouTube's own error message (e.g. "HTTP 400: Precondition check
+  failed.") instead of a bare status code.
+
 ## 0.3.2
 
 ### New features

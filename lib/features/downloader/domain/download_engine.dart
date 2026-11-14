@@ -80,6 +80,9 @@ class DownloadEngine {
   final int concurrency;
   final YouTubeResolver _youtube;
 
+  /// Exposed for diagnostics (connection tests) and future providers.
+  YouTubeResolver get youtube => _youtube;
+
   static const _pollInterval = Duration(seconds: 2);
   static const _progressFlush = Duration(milliseconds: 500);
   static const _connectTimeout = Duration(seconds: 30);

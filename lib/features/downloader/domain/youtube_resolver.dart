@@ -62,19 +62,30 @@ class YouTubeException implements Exception {
 /// Deliberately minimal: public, non-membership videos only. Members-only,
 /// age-restricted or sign-in-gated content is rejected with a clear error.
 class YouTubeResolver {
-  YouTubeResolver({HttpClient? client, String? baseUrl})
-      : _client = client ?? HttpClient()..connectionTimeout = _connectTimeout,
-          _baseUrl = baseUrl ?? 'https://www.youtube.com/youtubei/v1/';
+  YouTubeResolver({
+    HttpClient? client,
+    String? baseUrl,
+    List<Duration> retryBackoffs = const [Duration(seconds: 2), Duration(seconds: 6)],
+  })  : _client = client ?? HttpClient()..connectionTimeout = _connectTimeout,
+         _baseUrl = baseUrl ?? 'https://www.youtube.com/youtubei/v1/',
+         _retryBackoffs = retryBackoffs;
 
   static const _connectTimeout = Duration(seconds: 15);
   static const _requestTimeout = Duration(seconds: 30);
-  static const _userAgent =
-      'com.google.android.youtube/20.10.38 (Linux; U; Android 14) gzip';
   static const _clientName = 'ANDROID';
-  static const _clientVersion = '20.10.38';
+
+  /// Known-good ANDROID client versions, newest first. YouTube's edge
+  /// servers reject stale client versions with HTTP 400, so we rotate
+  /// through these on retry and remember whichever one works.
+  static const List<String> _clientVersions = ['20.34.39', '20.10.38', '20.34.37'];
 
   final HttpClient _client;
   final String _baseUrl;
+
+  /// Session cache: the last version that answered 200.
+  String _workingVersion = _clientVersions.first;
+
+  final List<Duration> _retryBackoffs;
 
   // ---------------------------------------------------------------- URLs
 
@@ -127,28 +138,6 @@ class YouTubeResolver {
 
   // ------------------------------------------------------------ endpoints
 
-  Future<Map<String, dynamic>> _post(
-      String endpoint, Map<String, dynamic> body) async {
-    final uri = Uri.parse('$_baseUrl$endpoint?prettyPrint=0');
-    final req = await _client
-        .postUrl(uri)
-        .timeout(_requestTimeout);
-    req.headers.contentType = ContentType.json;
-    req.headers.set('User-Agent', _userAgent);
-    req.write(jsonEncode(body));
-    final res = await req.close().timeout(_requestTimeout);
-    final text = await _readAll(res);
-    if (res.statusCode != 200) {
-      throw YouTubeException('YouTube request failed: HTTP ${res.statusCode}');
-    }
-    try {
-      final decoded = jsonDecode(text);
-      return decoded is Map<String, dynamic> ? decoded : {};
-    } catch (e) {
-      throw YouTubeException('Unreadable YouTube response: $e');
-    }
-  }
-
   Future<String> _readAll(HttpClientResponse res) async {
     final chunks = <List<int>>[];
     var total = 0;
@@ -163,14 +152,88 @@ class YouTubeResolver {
     return String.fromCharCodes(chunks.expand((c) => c));
   }
 
-  Map<String, dynamic> get _clientContext => {
+  /// POSTs to an Innertube endpoint, rotating client versions with backoff
+  /// when the server rejects the request (HTTP 400 is YouTube's way of
+  /// saying "stale client version" or "slow down").
+  Future<Map<String, dynamic>> _post(
+      String endpoint, Map<String, dynamic> body) async {
+    final versions = [
+      _workingVersion,
+      for (final v in _clientVersions) 
+        if (v != _workingVersion) v
+    ];
+    String? lastError;
+    var attempt = 0;
+    for (final version in versions) {
+      try {
+        final data = await _postOnce(endpoint, body, version);
+        _workingVersion = version;
+        return data;
+      } on YouTubeException catch (e) {
+        lastError = e.message;
+      } catch (e) {
+        lastError = '$e';
+      }
+      if (attempt < versions.length - 1) {
+        final backoff = attempt < _retryBackoffs.length
+            ? _retryBackoffs[attempt]
+            : const Duration(seconds: 6);
+        await Future<void>.delayed(backoff);
+      }
+      attempt++;
+    }
+    throw YouTubeException('YouTube request failed ($lastError)');
+  }
+
+  Future<Map<String, dynamic>> _postOnce(
+      String endpoint, Map<String, dynamic> body, String version) async {
+    final uri = Uri.parse('$_baseUrl$endpoint?prettyPrint=0');
+    final req =
+        await _client.postUrl(uri).timeout(_requestTimeout);
+    req.headers.contentType = ContentType.json;
+    req.headers.set('User-Agent',
+        'com.google.android.youtube/$version (Linux; U; Android 14) gzip');
+    final payload = Map<String, dynamic>.from(body)
+      ..['context'] = {
         'client': {
           'clientName': _clientName,
-          'clientVersion': _clientVersion,
+          'clientVersion': version,
           'hl': 'en',
           'gl': 'US',
         }
       };
+    req.write(jsonEncode(payload));
+    final res = await req.close().timeout(_requestTimeout);
+    final text = await _readAll(res);
+    if (res.statusCode != 200) {
+      throw YouTubeException(_errorSummary(res.statusCode, text));
+    }
+    try {
+      final decoded = jsonDecode(text);
+      return decoded is Map<String, dynamic> ? decoded : {};
+    } catch (e) {
+      throw YouTubeException('Unreadable YouTube response: $e');
+    }
+  }
+
+  /// Extracts a human-readable reason from a YouTube error body.
+  static String _errorSummary(int status, String body) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map<String, dynamic>) {
+        final err = decoded['error'];
+        if (err is Map<String, dynamic>) {
+          final message = err['message'] as String?;
+          if (message != null && message.isNotEmpty) {
+            return 'HTTP $status: $message';
+          }
+        }
+      }
+    } catch (_) {
+      // fall through
+    }
+    return 'HTTP $status';
+  }
 
   /// Resolves a single video: title, artist and a direct audio stream URL.
   Future<({YouTubeVideoRef ref, YouTubeAudioStream stream})>
@@ -179,7 +242,7 @@ class YouTubeResolver {
     if (videoId == null) {
       throw const YouTubeException('Not a recognizable YouTube video URL');
     }
-    final data = await _post('player', {'videoId': videoId, ..._clientContext});
+    final data = await _post('player', {'videoId': videoId});
 
     final status = data['playabilityStatus']?['status'] as String?;
     if (status != 'OK') {
@@ -218,7 +281,7 @@ class YouTubeResolver {
     final browseId = 'VL$playlistId';
 
     do {
-      final body = <String, dynamic>{'browseId': browseId, ..._clientContext};
+      final body = <String, dynamic>{'browseId': browseId};
       if (token != null) body['continuation'] = token;
       final data =
           await _post(token == null ? 'browse' : 'next', body);

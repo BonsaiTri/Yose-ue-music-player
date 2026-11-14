@@ -14,8 +14,10 @@ class DiagnosticsScreen extends ConsumerStatefulWidget {
 
 class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
   bool _generating = false;
+  bool _testingYouTube = false;
   String? _lastReportPath;
   String? _reportPreview;
+  String? _youtubeResult;
 
   @override
   Widget build(BuildContext context) {
@@ -75,6 +77,45 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
                 ),
               ),
             ),
+          ListTile(
+            title: const Text('Test YouTube connection'),
+            subtitle: Text(_youtubeResult ??
+                'Resolves a well-known video through the same path downloads use. Useful when a queue attempt fails.'),
+            trailing: _testingYouTube
+                ? const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2)),
+                  )
+                : const Icon(Icons.play_circle_outline),
+            onTap: _testingYouTube
+                ? null
+                : () async {
+                    setState(() => _testingYouTube = true);
+                    _youtubeResult = null;
+                    final deps = ref.watch(appDepsProvider);
+                    try {
+                      final resolved = await deps.downloader.youtube
+                          .resolveVideo(
+                              'https://www.youtube.com/watch?v=jNQXAC9IVRw');
+                      final ok = mounted;
+                      if (ok) {
+                        setState(() => _youtubeResult =
+                            'OK — resolved "${resolved.ref.title}" by '
+                            '${resolved.ref.artist} '
+                            '(${resolved.stream.extension} stream).');
+                      }
+                    } catch (e) {
+                      if (mounted) {
+                        setState(() => _youtubeResult = 'Failed: $e');
+                      }
+                    } finally {
+                      if (mounted) setState(() => _testingYouTube = false);
+                    }
+                  },
+          ),
           const ListTile(
             title: Text('Log storage'),
             subtitle: Text('Recent app events are kept in bounded memory and included in reports. Sensitive paths and tokens are redacted.'),

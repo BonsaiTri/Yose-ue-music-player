@@ -509,6 +509,95 @@ http://127.0.0.1:$port/c.wav
     }
   });
 
+  test('stale client version is rotated away after HTTP 400', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final calls = <String>[];
+    server.listen((req) async {
+      final chunks = <int>[];
+      await for (final c in req) {
+        chunks.addAll(c);
+      }
+      final body = jsonDecode(utf8.decode(chunks)) as Map<String, dynamic>;
+      final version =
+          ((body['context'] as Map<String, dynamic>)['client'] as Map<String, dynamic>)['clientVersion'] as String;
+      calls.add(version);
+      req.response.headers.contentType = ContentType.json;
+      if (version == '20.34.39') {
+        req.response.statusCode = 400;
+        req.response.write(jsonEncode({
+          'error': {'code': 400, 'message': 'Precondition check failed.'}
+        }));
+      } else {
+        req.response.statusCode = 200;
+        req.response.write(jsonEncode({
+          'playabilityStatus': {'status': 'OK'},
+          'videoDetails': {'title': 'T', 'author': 'A'},
+          'streamingData': {
+            'adaptiveFormats': [
+              {
+                'mimeType': 'audio/mp4; codecs="mp4a.40.2"',
+                'url': 'http://example.invalid/a.m4a',
+                'averageBitrate': 128000,
+              }
+            ]
+          }
+        }));
+      }
+      await req.response.close();
+    });
+    try {
+      final resolver = YouTubeResolver(
+        baseUrl: 'http://127.0.0.1:${server.port}/youtubei/v1/',
+        retryBackoffs: const [Duration(milliseconds: 10)],
+      );
+      final result =
+          await resolver.resolveVideo('https://www.youtube.com/watch?v=fBgKxsvl6M8');
+      expect(result.ref.title, 'T');
+      expect(result.stream.extension, 'm4a');
+      expect(calls.first, '20.34.39'); // preferred version tried first
+      expect(calls.length, greaterThanOrEqualTo(2));
+      expect(calls.last, isNot('20.34.39')); // rotated to a working version
+      // Session cache: a follow-up call goes straight to the working version.
+      await resolver.resolveVideo('https://www.youtube.com/watch?v=fBgKxsvl6M8');
+      expect(calls.last, calls[1]);
+    } finally {
+      await server.close(force: true);
+    }
+  });
+
+  test('when every client version fails the server message is surfaced',
+      () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((req) async {
+      await req.drain();
+      req.response.statusCode = 400;
+      req.response.headers.contentType = ContentType.json;
+      req.response.write(jsonEncode({
+        'error': {'code': 400, 'message': 'Precondition check failed.'}
+      }));
+      await req.response.close();
+    });
+    try {
+      final resolver = YouTubeResolver(
+        baseUrl: 'http://127.0.0.1:${server.port}/youtubei/v1/',
+        retryBackoffs: const [Duration(milliseconds: 1), Duration(milliseconds: 1)],
+      );
+      await expectLater(
+          resolver.resolveVideo('https://www.youtube.com/watch?v=fBgKxsvl6M8'),
+          throwsA(isA<YouTubeException>()));
+      // Prove the message carries the server's reason:
+      try {
+        await resolver.resolveVideo('https://www.youtube.com/watch?v=fBgKxsvl6M8');
+        fail('expected YouTubeException');
+      } on YouTubeException catch (e) {
+        expect(e.message, contains('Precondition check failed.'));
+        expect(e.message, contains('HTTP 400'));
+      }
+    } finally {
+      await server.close(force: true);
+    }
+  });
+
   test('progress is persisted while downloading', () async {
     final wav = _wavBytes(seconds: 2);
     serveBytes = wav;
