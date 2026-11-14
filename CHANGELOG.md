@@ -20,6 +20,11 @@
   and adds a one-tap **Use default location** reset (restores the original
   library; content added while a custom location was active stays in that
   folder).
+- **Link pasting is more forgiving**: pasting a link together with extra
+  text (metadata, JSON, extra lines) no longer produces a raw
+  `FormatException`; the app extracts the first line that looks like a
+  plain `http(s)` link and the engine rejects multi-line/whitespace URLs
+  with a clear message.
 
 ## 0.3.4
 

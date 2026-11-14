@@ -22,6 +22,7 @@ import 'package:music_player/database/repositories/library_repository.dart';
 import 'package:music_player/features/downloader/domain/download_engine.dart';
 import 'package:music_player/features/downloader/domain/yt_dlp.dart';
 import 'package:music_player/features/downloader/domain/youtube_resolver.dart';
+import 'package:music_player/features/downloader/presentation/downloads_screen.dart';
 import 'package:music_player/features/media_import/domain/import_service.dart';
 
 /// 1 s of silence as a valid WAV (16-bit PCM mono).
@@ -448,6 +449,66 @@ http://127.0.0.1:$port/c.wav
     } finally {
       await engine.stop();
     }
+  });
+
+  group('malformed paste handling', () {
+    test('queue rejects URLs with embedded newlines or spaces', () async {
+      final engine = DownloadEngine(
+          downloads: downloads, files: files, importer: importer);
+      try {
+        await expectLater(
+            engine.queue(
+                url: 'https://host.example/a.wav\n{\"title\": \"x\"}',
+                title: 'x'),
+            throwsA(isA<DownloadTaskException>()));
+        await expectLater(
+            engine.queue(
+                url: 'https://host.example/a b.wav', title: 'x'),
+            throwsA(isA<DownloadTaskException>()));
+      } finally {
+        await engine.stop();
+      }
+    });
+
+    test('queueYouTube rejects a multi-line paste before touching the backend',
+        () async {
+      final fake = _FakeYtDlp();
+      final engine = DownloadEngine(
+          downloads: downloads,
+          files: files,
+          importer: importer,
+          ytDlp: fake);
+      try {
+        await expectLater(
+            engine.queueYouTube(
+                'https://youtu.be/Qm8YmI7ceOg\n{"title": "Wellerman"}'),
+            throwsA(isA<DownloadTaskException>()));
+        expect(fake.calls, isEmpty);
+      } finally {
+        await engine.stop();
+      }
+    });
+
+    test('firstUrlLine picks the real link out of messy pastes', () {
+      const link = 'https://www.youtube.com/watch?v=Qm8YmI7ceOg';
+      // Plain URL passes through untouched.
+      expect(DownloadsScreen.firstUrlLine(link), link);
+      // URL followed by a JSON metadata line.
+      expect(
+          DownloadsScreen.firstUrlLine(
+              '$link\n{"title": "Wellerman (Sea Shanty)", "thumbnails": []}'),
+          link);
+      // JSON first, URL on the second line.
+      expect(
+          DownloadsScreen.firstUrlLine(
+              '{"title": "Wellerman"}\n$link'),
+          link);
+      // Nothing usable.
+      expect(DownloadsScreen.firstUrlLine('{"title": "Wellerman"}'), '');
+      expect(DownloadsScreen.firstUrlLine('not a link at all'), '');
+      // Whitespace around a plain URL is tolerated.
+      expect(DownloadsScreen.firstUrlLine('  $link  '), link);
+    });
   });
 
   test('stale client version is rotated away after HTTP 400', () async {

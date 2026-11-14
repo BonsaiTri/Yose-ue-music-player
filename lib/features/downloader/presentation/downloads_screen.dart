@@ -15,6 +15,17 @@ import 'package:music_player/features/downloader/domain/youtube_resolver.dart';
 class DownloadsScreen extends ConsumerStatefulWidget {
   const DownloadsScreen({super.key});
 
+  /// Returns the first line of [raw] that looks like a plain single-line
+  /// http(s) URL, or the empty string if none does. Multi-line pastes
+  /// (URL + JSON metadata, trailing lines, etc.) are common; Dart's Uri
+  /// parser would otherwise percent-encode the newlines into one bogus URL.
+  static String firstUrlLine(String raw) => raw
+      .split(RegExp(r'[\r\n]+'))
+      .map((s) => s.trim())
+      .firstWhere(
+          (s) => RegExp(r'^https?://\S+$', caseSensitive: false).hasMatch(s),
+          orElse: () => '');
+
   @override
   ConsumerState<DownloadsScreen> createState() => _DownloadsScreenState();
 }
@@ -56,8 +67,18 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
   /// title/artist/album can still be corrected after the file is imported
   /// (metadata extraction fills what the file itself declares).
   Future<void> _add() async {
-    final url = _urlController.text.trim();
-    if (url.isEmpty || _adding) return;
+    final raw = _urlController.text.trim();
+    if (raw.isEmpty || _adding) return;
+    // People sometimes paste extra text along with the link (metadata,
+    // JSON, trailing lines). Dart's Uri parser silently percent-encodes
+    // newlines, so a multi-line paste would otherwise become one bogus
+    // URL. Pick the first line that actually looks like a plain link.
+    final url = DownloadsScreen.firstUrlLine(raw);
+    if (url.isEmpty) {
+      _showSnack('Paste a single link starting with http:// or https:// '
+          '(no extra text).');
+      return;
+    }
     final uri = Uri.tryParse(url);
     if (uri == null || !uri.hasScheme ||
         !(uri.scheme == 'http' || uri.scheme == 'https')) {
@@ -88,7 +109,10 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
       _urlController.clear();
       await _load();
     } catch (e) {
-      _showSnack('Could not queue: $e');
+      final detail = e is FormatException
+          ? 'that link looks malformed — paste a plain http(s) URL only'
+          : '$e';
+      _showSnack('Could not queue: $detail');
     } finally {
       if (mounted) setState(() => _adding = false);
     }

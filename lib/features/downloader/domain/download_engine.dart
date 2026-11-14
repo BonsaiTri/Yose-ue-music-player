@@ -135,20 +135,33 @@ class DownloadEngine {
     String album = 'Unknown Album',
     String? trackId,
     int priority = 0,
-  }) =>
-      downloads.create(
-        url: url,
-        title: title,
-        artist: artist,
-        album: album,
-        trackId: trackId,
-        priority: priority,
-      );
+  }) async {
+    _validateUrl(url);
+    return downloads.create(
+      url: url,
+      title: title,
+      artist: artist,
+      album: album,
+      trackId: trackId,
+      priority: priority,
+    );
+  }
+
+  /// Rejects URLs carrying control characters or whitespace. Dart's
+  /// [Uri] percent-encodes newlines instead of rejecting them, so a
+  /// pasted multi-line blob can otherwise masquerade as a valid URL.
+  static void _validateUrl(String url) {
+    if (RegExp(r'[\u0000-\u0020\u007F-\u00A0]').hasMatch(url)) {
+      throw const DownloadTaskException(
+          'Invalid URL — paste a plain single-line http(s) link');
+    }
+  }
 
   /// Enqueues every track in an M3U/M3U8 playlist at [url] as individual
   /// download tasks. Relative URLs are resolved against the playlist URL;
   /// nested playlists are skipped. Returns the queue summary.
   Future<PlaylistQueueSummary> queuePlaylist(String url) async {
+    _validateUrl(url);
     final uri = Uri.tryParse(url);
     if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
       throw const DownloadTaskException('Playlist URL must be http or https');
@@ -183,6 +196,7 @@ class DownloadEngine {
   /// * Playlist: every track becomes a task with its watch URL; titles come
   ///   from a flat yt-dlp listing (no per-track network cost).
   Future<PlaylistQueueSummary> queueYouTube(String url) async {
+    _validateUrl(url);
     if (!YouTubeResolver.isYouTubeUrl(url)) {
       throw const DownloadTaskException('Not a YouTube URL');
     }
