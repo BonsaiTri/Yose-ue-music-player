@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 
 import 'package:music_player/app/bootstrap.dart';
 import 'package:music_player/database/database.dart';
+import 'package:music_player/features/downloader/domain/download_engine.dart';
 import 'package:music_player/features/downloader/domain/yt_dlp.dart';
 import 'package:music_player/features/downloader/domain/youtube_resolver.dart';
 
@@ -129,9 +130,31 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
           ? '“${entry.title}” queued for download'
           : 'Queued ${summary.queued} tracks');
       await _load();
+    } on AlreadyDownloadedError catch (e) {
+      _showSnack(e.message);
+    } on AlreadyInQueueError catch (e) {
+      _showSnack(e.message);
     } catch (e) {
       _showSnack('Could not queue: $e');
     }
+  }
+
+  /// "Queued N tracks" plus the counts of entries that were already in the
+  /// library or could not be queued.
+  static String _queueSummaryText(PlaylistQueueSummary summary,
+      {required String source, required String single}) {
+    final parts = <String>[
+      summary.queued == 1
+          ? single
+          : 'Queued ${summary.queued} tracks from $source',
+    ];
+    if (summary.alreadyDownloaded > 0) {
+      parts.add('${summary.alreadyDownloaded} already downloaded');
+    }
+    if (summary.ignored > 0) {
+      parts.add('${summary.ignored} skipped');
+    }
+    return parts.join(' · ');
   }
 
   /// Adds a direct media URL to the download queue.
@@ -164,23 +187,21 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
       final path = uri.path.toLowerCase();
       if (YouTubeResolver.isYouTubeUrl(uri.toString())) {
         final summary = await engine.queueYouTube(uri.toString());
-        _showSnack(summary.queued == 1
-            ? 'YouTube track queued'
-            : summary.ignored > 0
-                ? 'Queued ${summary.queued} tracks from YouTube playlist '
-                    '(${summary.ignored} skipped)'
-                : 'Queued ${summary.queued} tracks from YouTube playlist');
+        _showSnack(_queueSummaryText(
+            summary, source: 'YouTube playlist', single: 'YouTube track queued'));
       } else if (path.endsWith('.m3u') || path.endsWith('.m3u8')) {
         final summary = await engine.queuePlaylist(uri.toString());
-        _showSnack(summary.ignored > 0
-            ? 'Queued ${summary.queued} tracks from playlist '
-                '(${summary.ignored} skipped)'
-            : 'Queued ${summary.queued} tracks from playlist');
+        _showSnack(_queueSummaryText(
+            summary, source: 'playlist', single: 'Track queued'));
       } else {
         await engine.queue(url: uri.toString(), title: _titleFromUri(uri));
       }
       _urlController.clear();
       await _load();
+    } on AlreadyDownloadedError catch (e) {
+      _showSnack(e.message);
+    } on AlreadyInQueueError catch (e) {
+      _showSnack(e.message);
     } catch (e) {
       final detail = e is FormatException
           ? 'that link looks malformed — paste a plain http(s) URL only'

@@ -518,6 +518,84 @@ http://127.0.0.1:$port/c.wav
     expect(await downloads.clearHistory(), 0);
   });
 
+  test('queue refuses a URL whose completed file is still present',
+      () async {
+    final f = File(p.join(temp.path, 'song.m4a'))..createSync();
+    final done = await downloads.create(
+        url: 'https://example.com/song.m4a', title: 'Song');
+    await downloads.updateStatus(done.id, DownloadTaskStatus.completed,
+        finalPath: f.path);
+    await expectLater(
+        engine.queue(url: 'https://example.com/song.m4a', title: 'Song'),
+        throwsA(isA<AlreadyDownloadedError>()));
+  });
+
+  test('queue refuses a URL that already has an open task', () async {
+    final open = await downloads.create(
+        url: 'https://example.com/song.m4a', title: 'Song');
+    expect(open.status, DownloadTaskStatus.queued);
+    await expectLater(
+        engine.queue(url: 'https://example.com/song.m4a', title: 'Song'),
+        throwsA(isA<AlreadyInQueueError>()));
+  });
+
+  test('queue allows re-downloading when the completed file is gone',
+      () async {
+    final missing = File(p.join(temp.path, 'gone.m4a'));
+    final done = await downloads.create(
+        url: 'https://example.com/song.m4a', title: 'Song');
+    await downloads.updateStatus(done.id, DownloadTaskStatus.completed,
+        finalPath: missing.path);
+    final task =
+        await engine.queue(url: 'https://example.com/song.m4a', title: 'Song');
+    expect(task.status, DownloadTaskStatus.queued);
+  });
+
+  test('YouTube playlist skips tracks that are already downloaded', () async {
+    final fake = _FakeYtDlp(entries: const [
+      YtDlpEntry(id: 'aaaaaaaaaaa', title: 'Old Song'),
+      YtDlpEntry(id: 'bbbbbbbbbbb', title: 'New Song'),
+    ]);
+    final doneFile = File(p.join(temp.path, 'aaaaaaaaaaa.m4a'))..createSync();
+    final old = await downloads.create(
+        url: 'https://www.youtube.com/watch?v=aaaaaaaaaaa',
+        title: 'Old Song');
+    await downloads.updateStatus(old.id, DownloadTaskStatus.completed,
+        finalPath: doneFile.path);
+    final eng = DownloadEngine(
+        downloads: downloads, files: files, importer: importer, ytDlp: fake);
+    try {
+      final summary = await eng.queueYouTube(
+          'https://www.youtube.com/playlist?list=PL1234');
+      expect(summary.queued, 1);
+      expect(summary.alreadyDownloaded, 1);
+      expect(summary.ignored, 0);
+    } finally {
+      await eng.stop();
+    }
+  });
+
+  test('YouTube single video already downloaded is refused clearly', () async {
+    final fake = _FakeYtDlp(entries: const [
+      YtDlpEntry(id: 'aaaaaaaaaaa', title: 'Old Song'),
+    ]);
+    final doneFile = File(p.join(temp.path, 'aaaaaaaaaaa.m4a'))..createSync();
+    final old = await downloads.create(
+        url: 'https://www.youtube.com/watch?v=aaaaaaaaaaa',
+        title: 'Old Song');
+    await downloads.updateStatus(old.id, DownloadTaskStatus.completed,
+        finalPath: doneFile.path);
+    final eng = DownloadEngine(
+        downloads: downloads, files: files, importer: importer, ytDlp: fake);
+    try {
+      await expectLater(
+          eng.queueYouTube('https://www.youtube.com/watch?v=aaaaaaaaaaa'),
+          throwsA(isA<AlreadyDownloadedError>()));
+    } finally {
+      await eng.stop();
+    }
+  });
+
   test('searchYouTube rejects empty queries and surfaces backend errors',
       () async {
     final engine = DownloadEngine(

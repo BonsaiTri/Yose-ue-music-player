@@ -48,6 +48,32 @@ class DownloadRepository {
   Future<DownloadTask?> byId(String id) =>
       (db.select(db.downloadTasks)..where((t) => t.id.equals(id))).getSingleOrNull();
 
+  /// The most recent completed task with exactly [url], if any.
+  Future<DownloadTask?> completedByUrl(String url) =>
+      (db.select(db.downloadTasks)
+          ..where((t) =>
+              t.url.equals(url) &
+              t.status.equalsValue(DownloadTaskStatus.completed))
+          ..orderBy([(t) => OrderingTerm.desc(t.updatedAt)])
+          ..limit(1))
+          .getSingleOrNull();
+
+  /// Any queued, active, or paused task with exactly [url], if any.
+  Future<DownloadTask?> openByUrl(String url) =>
+      (db.select(db.downloadTasks)
+          ..where((t) =>
+              t.url.equals(url) &
+              t.status.isInValues(const [
+                DownloadTaskStatus.queued,
+                DownloadTaskStatus.preparing,
+                DownloadTaskStatus.downloading,
+                DownloadTaskStatus.processing,
+                DownloadTaskStatus.paused,
+              ]))
+          ..orderBy([(t) => OrderingTerm.desc(t.updatedAt)])
+          ..limit(1))
+          .getSingleOrNull();
+
   Future<DownloadTask> create({
     required String url,
     required String title,

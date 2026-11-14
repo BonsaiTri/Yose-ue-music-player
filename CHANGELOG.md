@@ -47,6 +47,13 @@
 - **Clear download history**: the Downloads screen's History section has a
   sweep icon that (after confirmation) removes all finished download
   records. Music and downloaded files in the library are untouched.
+- **Duplicate downloads are skipped**: queueing a URL that was already
+  downloaded (and whose file is still in the library) is refused with a
+  clear "already downloaded" message instead of re-downloading. URLs
+  that are still queued/in progress are refused as "already in the
+  queue". For playlists, already-downloaded tracks are skipped and
+  counted in the summary; if a track's file was deleted, re-downloading
+  is allowed again.
 
 ## 0.3.4
 

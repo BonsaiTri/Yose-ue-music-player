@@ -38,15 +38,39 @@ class DownloadTaskException implements Exception {
   String toString() => 'DownloadTaskException: $message';
 }
 
+/// The exact source was already downloaded and its file (or library track)
+/// is still present, so re-downloading would just overwrite a good copy.
+class AlreadyDownloadedError extends DownloadTaskException {
+  const AlreadyDownloadedError([String? title])
+      : super(title == null
+            ? 'Already downloaded — it is in your library'
+            : '“$title” is already downloaded — it is in your library');
+}
+
+/// The exact source already has a task that is queued, active, or paused.
+class AlreadyInQueueError extends DownloadTaskException {
+  const AlreadyInQueueError([String? title])
+      : super(title == null
+            ? 'Already in the download queue'
+            : '“$title” is already in the download queue');
+}
+
 /// Outcome of expanding a playlist into individual download tasks.
 class PlaylistQueueSummary {
-  const PlaylistQueueSummary({required this.queued, required this.ignored});
+  const PlaylistQueueSummary(
+      {required this.queued,
+      required this.ignored,
+      this.alreadyDownloaded = 0});
 
   /// Tracks enqueued as individual download tasks.
   final int queued;
 
   /// Entries that could not be queued (duplicates, malformed, …).
   final int ignored;
+
+  /// Entries skipped because they are already downloaded (file/track still
+  /// present in the library).
+  final int alreadyDownloaded;
 }
 
 /// One parsed entry of an M3U/M3U8 playlist.
@@ -137,6 +161,7 @@ class DownloadEngine {
     int priority = 0,
   }) async {
     _validateUrl(url);
+    await _ensureNotDuplicate(url, title: title);
     return downloads.create(
       url: url,
       title: title,
@@ -145,6 +170,32 @@ class DownloadEngine {
       trackId: trackId,
       priority: priority,
     );
+  }
+
+  /// Refuses to enqueue [url] when it is already present:
+  ///
+  /// * [AlreadyInQueueError] — a queued/active/paused task uses the URL,
+  /// * [AlreadyDownloadedError] — a completed task used it and the file or
+  ///   library track is still present (a completed task whose file was
+  ///   deleted is *not* a duplicate — re-downloading is correct).
+  Future<void> _ensureNotDuplicate(String url, {String? title}) async {
+    final open = await downloads.openByUrl(url);
+    if (open != null) throw AlreadyInQueueError(title ?? open.title);
+    final done = await downloads.completedByUrl(url);
+    if (done != null && await _stillInLibrary(done)) {
+      throw AlreadyDownloadedError(title ?? done.title);
+    }
+  }
+
+  /// True when a completed task's music is still reachable: its library
+  /// track exists, or the final file is still on disk.
+  Future<bool> _stillInLibrary(DownloadTask task) async {
+    final trackId = task.trackId;
+    if (trackId != null && await importer.tracks.byId(trackId) != null) {
+      return true;
+    }
+    final path = task.finalPath;
+    return path != null && File(path).existsSync();
   }
 
   /// Rejects URLs carrying control characters or whitespace. Dart's
@@ -173,7 +224,17 @@ class DownloadEngine {
     }
     var queued = 0;
     var ignored = 0;
+    var already = 0;
     for (final entry in entries) {
+      try {
+        await _ensureNotDuplicate(entry.url, title: entry.title);
+      } on AlreadyDownloadedError {
+        already++;
+        continue;
+      } on AlreadyInQueueError {
+        ignored++;
+        continue;
+      }
       try {
         await downloads.create(url: entry.url, title: entry.title, artist: entry.artist);
         queued++;
@@ -182,10 +243,13 @@ class DownloadEngine {
       }
     }
     if (queued == 0) {
-      throw const DownloadTaskException('Could not queue any tracks from playlist');
+      throw already > 0
+          ? const AlreadyDownloadedError()
+          : const DownloadTaskException('Could not queue any tracks from playlist');
     }
     AppLogger.info('Queued $queued tracks from playlist $url', tag: 'download');
-    return PlaylistQueueSummary(queued: queued, ignored: ignored);
+    return PlaylistQueueSummary(
+        queued: queued, ignored: ignored, alreadyDownloaded: already);
   }
 
   /// Enqueues a YouTube video or playlist.
@@ -212,7 +276,17 @@ class DownloadEngine {
       }
       var queued = 0;
       var ignored = 0;
+      var already = 0;
       for (final entry in entries.take(_maxPlaylistEntries)) {
+        try {
+          await _ensureNotDuplicate(entry.watchUrl, title: entry.title);
+        } on AlreadyDownloadedError {
+          already++;
+          continue;
+        } on AlreadyInQueueError {
+          ignored++;
+          continue;
+        }
         try {
           await downloads.create(
             url: entry.watchUrl,
@@ -225,10 +299,15 @@ class DownloadEngine {
         }
       }
       if (queued == 0) {
-        throw const DownloadTaskException('Could not queue any tracks from playlist');
+        throw already > 0
+            ? (entries.length == 1
+                ? AlreadyDownloadedError(entries.first.title)
+                : const AlreadyDownloadedError())
+            : const DownloadTaskException('Could not queue any tracks from playlist');
       }
       AppLogger.info('Queued $queued tracks from YouTube $url', tag: 'download');
-      return PlaylistQueueSummary(queued: queued, ignored: ignored);
+      return PlaylistQueueSummary(
+          queued: queued, ignored: ignored, alreadyDownloaded: already);
     } on YtDlpException catch (e) {
       throw DownloadTaskException(e.message);
     }
