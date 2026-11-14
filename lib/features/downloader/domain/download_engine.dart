@@ -9,6 +9,7 @@ import 'package:music_player/core/services/file_service.dart';
 import 'package:music_player/database/database.dart';
 import 'package:music_player/database/repositories/download_repository.dart';
 import 'package:music_player/features/media_import/domain/import_service.dart';
+import 'package:music_player/features/downloader/domain/yt_dlp.dart';
 import 'package:music_player/features/downloader/domain/youtube_resolver.dart';
 
 /// Internal signals for cooperative stop.
@@ -71,17 +72,17 @@ class DownloadEngine {
     required this.files,
     required this.importer,
     this.concurrency = AppConstants.maxConcurrentDownloads,
-    YouTubeResolver? youtube,
-  }) : _youtube = youtube ?? YouTubeResolver();
+    this.ytDlp,
+  });
 
   final DownloadRepository downloads;
   final FileService files;
   final ImportService importer;
   final int concurrency;
-  final YouTubeResolver _youtube;
 
-  /// Exposed for diagnostics (connection tests) and future providers.
-  YouTubeResolver get youtube => _youtube;
+  /// yt-dlp backend for YouTube sources (created by bootstrap; injected in
+  /// tests). YouTube downloads throw a clear error when this is absent.
+  final YtDlpBackend? ytDlp;
 
   static const _pollInterval = Duration(seconds: 2);
   static const _progressFlush = Duration(milliseconds: 500);
@@ -114,6 +115,7 @@ class DownloadEngine {
     _started = false;
     _client?.close(force: true);
     _client = null;
+    ytDlp?.close();
   }
 
   /// Enqueues a new download (source of truth is the database).
@@ -166,47 +168,45 @@ class DownloadEngine {
 
   /// Enqueues a YouTube video or playlist.
   ///
-  /// * Single video: one task whose source is the watch URL; the audio
-  ///   stream is resolved at download time (YouTube stream URLs expire).
-  /// * Playlist: every track becomes a task with its watch URL; titles and
-  ///   artists come from the playlist metadata.
+  /// * Single video: one task whose source is the watch URL; the audio is
+  ///   downloaded via yt-dlp at execution time (stream URLs and PO tokens
+  ///   expire, so nothing is pre-resolved).
+  /// * Playlist: every track becomes a task with its watch URL; titles come
+  ///   from a flat yt-dlp listing (no per-track network cost).
   Future<PlaylistQueueSummary> queueYouTube(String url) async {
     if (!YouTubeResolver.isYouTubeUrl(url)) {
       throw const DownloadTaskException('Not a YouTube URL');
     }
+    final backend = ytDlp;
+    if (backend == null) {
+      throw const DownloadTaskException(
+          'YouTube downloading is not available on this platform');
+    }
     try {
-      final playlistId = YouTubeResolver.playlistIdFromUrl(url);
-      if (playlistId != null) {
-        final entries = await _youtube.resolvePlaylist(url, limit: _maxPlaylistEntries);
-        var queued = 0;
-        var ignored = 0;
-        for (final entry in entries) {
-          try {
-            await downloads.create(
-              url: entry.watchUrl,
-              title: entry.title,
-              artist: entry.artist,
-            );
-            queued++;
-          } catch (_) {
-            ignored++;
-          }
-        }
-        if (queued == 0) {
-          throw const DownloadTaskException('Could not queue any tracks from playlist');
-        }
-        AppLogger
-            .info('Queued $queued tracks from YouTube playlist $playlistId', tag: 'download');
-        return PlaylistQueueSummary(queued: queued, ignored: ignored);
+      final entries = await backend.list(url);
+      if (entries.isEmpty) {
+        throw const DownloadTaskException('No tracks found at this YouTube URL');
       }
-
-      // Single video: resolve metadata now, stream at download time.
-      final resolved = await _youtube.resolveVideo(url);
-      final ref = resolved.ref;
-      await downloads.create(url: ref.watchUrl, title: ref.title, artist: ref.artist);
-      AppLogger.info('Queued YouTube video ${ref.videoId} (${ref.title})', tag: 'download');
-      return const PlaylistQueueSummary(queued: 1, ignored: 0);
-    } on YouTubeException catch (e) {
+      var queued = 0;
+      var ignored = 0;
+      for (final entry in entries.take(_maxPlaylistEntries)) {
+        try {
+          await downloads.create(
+            url: entry.watchUrl,
+            title: entry.title,
+            artist: entry.channel ?? 'Unknown Artist',
+          );
+          queued++;
+        } catch (_) {
+          ignored++;
+        }
+      }
+      if (queued == 0) {
+        throw const DownloadTaskException('Could not queue any tracks from playlist');
+      }
+      AppLogger.info('Queued $queued tracks from YouTube $url', tag: 'download');
+      return PlaylistQueueSummary(queued: queued, ignored: ignored);
+    } on YtDlpException catch (e) {
       throw DownloadTaskException(e.message);
     }
   }
@@ -349,37 +349,72 @@ class DownloadEngine {
         throw DownloadTaskException('URL must be http or https');
       }
 
-      // YouTube sources: resolve a fresh direct audio stream now. The task's
-      // persisted URL stays the watch URL, so retries always re-resolve.
-      String effectiveUrl = task.url;
+      final isYouTube = YouTubeResolver.isYouTubeUrl(task.url);
       String? forcedExtension;
-      if (YouTubeResolver.isYouTubeUrl(task.url)) {
+      late File target;
+
+      if (isYouTube) {
+        // YouTube: yt-dlp handles stream resolution, PO tokens and rate
+        // limiting internally. The watch URL stays the persisted source,
+        // so retries always start fresh.
+        final backend = ytDlp;
+        if (backend == null) {
+          throw const DownloadTaskException(
+              'YouTube downloading is not available on this platform');
+        }
         if (_cancelled.contains(id)) throw const _Cancelled();
-        final resolved = await _youtube.resolveVideo(task.url);
-        effectiveUrl = resolved.stream.url;
-        forcedExtension = resolved.stream.extension;
+        tempPath = p.join(files.tempDir, 'ytdl_$id');
+        await downloads.updateStatus(id, DownloadTaskStatus.preparing, tempPath: tempPath);
+        if (_cancelled.contains(id)) throw const _Cancelled();
+        await downloads.updateStatus(id, DownloadTaskStatus.downloading);
+        String downloadedPath;
+        try {
+          downloadedPath = await backend.downloadAudio(
+            url: task.url,
+            workDir: tempPath,
+            processKey: id,
+            expectedId: YouTubeResolver.videoIdFromUrl(task.url) ?? 'unknown',
+            shouldCancel: () => _cancelled.contains(id),
+            onProgress: (progress) => _flushYtProgress(id, progress),
+          );
+        } on YtDlpException catch (e) {
+          if (_cancelled.contains(id)) throw const _Cancelled();
+          throw DownloadTaskException(e.message);
+        }
+        // Use the real stream format (m4a preferred, webm possible).
+        final ext =
+            p.extension(downloadedPath).toLowerCase().replaceAll('.', '');
+        if (ext.isNotEmpty && AppConstants.audioExtensions.contains(ext)) {
+          forcedExtension = ext;
+        }
+        // PROCESSING: atomic move into the downloads dir.
+        await downloads.updateStatus(id, DownloadTaskStatus.processing, progress: 1.0);
+        target = _finalPath(task, extensionOverride: forcedExtension);
+        await files.atomicMove(downloadedPath, target.path);
+        tempPath = null; // owned by the library from here on
+      } else {
+        // PREPARING: allocate the temp file, probe expected size.
+        String effectiveUrl = task.url;
+        tempPath = p.join(files.tempDir, 'dl_${id}.part');
+        await downloads.updateStatus(id, DownloadTaskStatus.preparing, tempPath: tempPath);
+        if (_cancelled.contains(id)) throw const _Cancelled();
+        final expected = await _probeLength(effectiveUrl);
+        if (expected != null) {
+          await downloads.updateStatus(id, DownloadTaskStatus.preparing, bytesExpected: expected);
+        }
+
+        // DOWNLOADING: stream to the temp file with throttled progress.
+        if (_cancelled.contains(id)) throw const _Cancelled();
+        await downloads.updateStatus(id, DownloadTaskStatus.downloading);
+        final done = await _downloadToFile(id, effectiveUrl, tempPath, expected);
+
+        // PROCESSING: atomic move into the downloads dir, register in library.
+        await downloads.updateStatus(id, DownloadTaskStatus.processing,
+            progress: 1.0, bytesDone: done, speedBps: 0);
+        target = _finalPath(task);
+        await files.atomicMove(tempPath, target.path);
+        tempPath = null; // owned by the library from here on
       }
-
-      // PREPARING: allocate the temp file, probe expected size.
-      tempPath = p.join(files.tempDir, 'dl_${id}.part');
-      await downloads.updateStatus(id, DownloadTaskStatus.preparing, tempPath: tempPath);
-      if (_cancelled.contains(id)) throw const _Cancelled();
-      final expected = await _probeLength(effectiveUrl);
-      if (expected != null) {
-        await downloads.updateStatus(id, DownloadTaskStatus.preparing, bytesExpected: expected);
-      }
-
-      // DOWNLOADING: stream to the temp file with throttled progress.
-      if (_cancelled.contains(id)) throw const _Cancelled();
-      await downloads.updateStatus(id, DownloadTaskStatus.downloading);
-      final done = await _downloadToFile(id, effectiveUrl, tempPath, expected);
-
-      // PROCESSING: atomic move into the downloads dir, register in library.
-      await downloads.updateStatus(id, DownloadTaskStatus.processing,
-          progress: 1.0, bytesDone: done, speedBps: 0);
-      final target = _finalPath(task, extensionOverride: forcedExtension);
-      await files.atomicMove(tempPath, target.path);
-      tempPath = null; // owned by the library from here on
 
       // Reject pages/garque that merely *look* like files (wrong content).
       if (!await _looksLikeAudioFile(target.path)) {
@@ -422,14 +457,20 @@ class DownloadEngine {
       _running.remove(id);
       _cancelled.remove(id);
       _paused.remove(id);
+      _ytProgressClock.remove(id);
     }
   }
 
   Future<void> _fail(String id, Object e, String? tempPath) async {
+    // tempPath is either a .part file (direct downloads) or a work
+    // directory (yt-dlp downloads).
     if (tempPath != null) {
       try {
         final f = File(tempPath);
-        if (f.existsSync()) await f.delete();
+        if (f.existsSync()) await f.delete(); else {
+          final d = Directory(tempPath);
+          if (d.existsSync()) await d.delete(recursive: true);
+        }
       } catch (_) {}
     }
     if (e is _Cancelled) {
@@ -439,11 +480,28 @@ class DownloadEngine {
     } else {
       final message = e is DownloadTaskException
           ? e.message
-          : e is YouTubeException
+          : e is YtDlpException
               ? e.message
               : '$e';
       AppLogger.error('Download $id failed: $message', tag: 'download');
       await downloads.updateStatus(id, DownloadTaskStatus.failed, error: message);
+    }
+  }
+
+  /// Throttled progress persistence for yt-dlp runs (fraction only; the
+  /// backend reports percent + ETA, not byte counts).
+  final _ytProgressClock = <String, DateTime>{};
+
+  Future<void> _flushYtProgress(String id, YtDlpProgress progress) async {
+    final now = DateTime.now();
+    final last = _ytProgressClock[id];
+    if (last != null && now.difference(last) < _progressFlush) return;
+    _ytProgressClock[id] = now;
+    try {
+      await downloads.updateStatus(
+          id, DownloadTaskStatus.downloading, progress: progress.fraction);
+    } catch (_) {
+      // Progress persistence is best-effort.
     }
   }
 

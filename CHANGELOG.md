@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.3.4
+
+### Changed
+- **YouTube downloads now use yt-dlp** instead of the raw Innertube API.
+  YouTube requires PO (proof-of-origin) tokens on its stream URLs since
+  2024, which plain HTTP clients cannot produce; yt-dlp performs the
+  attestation internally. This is a wholesale replacement of the download
+  mechanism, not a fallback: the old resolver is no longer used.
+  - **Android**: bundled yt-dlp runtime (private Python + yt-dlp script via
+    the `youtubedl-android` AAR; arm64-v8a). APK size grows by ~100 MB.
+  - **Desktop (Windows/macOS/Linux)**: pinned yt-dlp binary
+    (`2026.10.26`) downloaded once into the app data dir on first use,
+    SHA-256 verified. Linux needs a system `python3 >= 3.11`.
+  - Downloads prefer `bestaudio[ext=m4a]` with a best-audio fallback;
+    the real stream format is preserved and imported as-is.
+  - Playlist listing uses `--dump-json --flat-playlist` so track order,
+    titles and channel names come straight from YouTube.
+  - Cancellation kills the underlying yt-dlp process (Android) or process
+    group (desktop); temp directories are cleaned up on failure.
+  - The Settings → Diagnostics "Test YouTube connection" now exercises the
+    real download path (it lists a public video through yt-dlp).
+
 ## 0.3.3
 
 ### Fixes

@@ -20,6 +20,7 @@ import 'package:music_player/database/database.dart';
 import 'package:music_player/database/repositories/download_repository.dart';
 import 'package:music_player/database/repositories/library_repository.dart';
 import 'package:music_player/features/downloader/domain/download_engine.dart';
+import 'package:music_player/features/downloader/domain/yt_dlp.dart';
 import 'package:music_player/features/downloader/domain/youtube_resolver.dart';
 import 'package:music_player/features/media_import/domain/import_service.dart';
 
@@ -391,58 +392,17 @@ http://127.0.0.1:$port/c.wav
   test('YouTube playlist URL queues every track with parsed titles',
       () async {
     const pl = 'PL8_b2d0WTcErfeETzJGV88mOOkHvAdQoL';
-    routeJson = {
-      '/youtubei/v1/browse': {
-        'contents': {
-          'singleColumnBrowseResultsRenderer': {
-            'content': {
-              'sectionListRenderer': {
-                'contents': [
-                  {
-                    'playlistVideoListRenderer': {
-                      'contents': [
-                        {
-                          'playlistVideoRenderer': {
-                            'videoId': 'aaaaaaaaaaa',
-                            'title': {'runs': [{'text': 'First Song'}]},
-                            'ownerText': {'runs': [{'text': 'Artist One'}]},
-                          }
-                        },
-                        {
-                          'playlistVideoRenderer': {
-                            'videoId': 'bbbbbbbbbbb',
-                            'title': {'runs': [{'text': 'Second Song'}]},
-                            'ownerText': {'runs': [{'text': 'Artist Two'}]},
-                          }
-                        },
-                      ]
-                    }
-                  },
-                  {
-                    'continuationItemRenderer': {
-                      'continuationEndpoint': {'continuation': 'tok'}
-                    }
-                  },
-                ]
-              }
-            }
-          }
-        }
-      },
-      // Continuation page: nothing more.
-      '/youtubei/v1/next': {},
-    };
-    final resolver = YouTubeResolver(baseUrl: 'http://127.0.0.1:$port/youtubei/v1/');
+    final fake = _FakeYtDlp(entries: const [
+      YtDlpEntry(id: 'aaaaaaaaaaa', title: 'First Song', channel: 'Artist One'),
+      YtDlpEntry(id: 'bbbbbbbbbbb', title: 'Second Song', channel: 'Artist Two'),
+    ]);
     final engine = DownloadEngine(
-      downloads: downloads,
-      files: files,
-      importer: importer,
-      youtube: resolver,
-    );
+        downloads: downloads, files: files, importer: importer, ytDlp: fake);
     try {
       final summary =
           await engine.queueYouTube('https://www.youtube.com/playlist?list=$pl');
       expect(summary.queued, 2);
+      expect(summary.ignored, 0);
       final queued = await downloads.queued(limit: 10);
       expect(queued.length, 2);
       expect(queued.map((t) => t.title), ['First Song', 'Second Song']);
@@ -454,16 +414,9 @@ http://127.0.0.1:$port/c.wav
   });
 
   test('YouTube playlist that does not exist is rejected clearly', () async {
-    routeJson = {
-      '/youtubei/v1/browse': {
-        'alerts': [
-          {'alertRenderer': {'type': 'ERROR', 'text': {'runs': [{'text': 'The playlist does not exist.'}]}}}
-        ]
-      }
-    };
-    final resolver = YouTubeResolver(baseUrl: 'http://127.0.0.1:$port/youtubei/v1/');
+    final fake = _FakeYtDlp(errorMessage: 'The playlist does not exist.');
     final engine = DownloadEngine(
-      downloads: downloads, files: files, importer: importer, youtube: resolver);
+        downloads: downloads, files: files, importer: importer, ytDlp: fake);
     try {
       await expectLater(
           engine.queueYouTube(
@@ -474,38 +427,26 @@ http://127.0.0.1:$port/c.wav
     }
   });
 
-  test('YouTube video task resolves a stream and completes as m4a', () async {
-    final wav = _wavBytes();
-    routeBytes = {'/stream-a': wav};
-    routeJson = {
-      '/youtubei/v1/player': {
-        'playabilityStatus': {'status': 'OK'},
-        'videoDetails': {'title': 'All Eyes On Me (Song Only)', 'author': 'Bo Burnham - Topic'},
-        'streamingData': {
-          'adaptiveFormats': [
-            {'mimeType': 'audio/webm; codecs="opus"', 'url': 'http://127.0.0.1:$port/stream-bad', 'averageBitrate': 128000},
-            {'mimeType': 'audio/mp4; codecs="mp4a.40.2"', 'url': 'http://127.0.0.1:$port/stream-a', 'averageBitrate': 129000},
-          ]
-        }
-      }
-    };
-    final resolver = YouTubeResolver(baseUrl: 'http://127.0.0.1:$port/youtubei/v1/');
-    final ytEngine = DownloadEngine(
-      downloads: downloads, files: files, importer: importer, youtube: resolver);
+  test('YouTube video task downloads audio via yt-dlp and completes',
+      () async {
+    final fake = _FakeYtDlp(fileBytes: _wavBytes());
+    final engine = DownloadEngine(
+        downloads: downloads, files: files, importer: importer, ytDlp: fake);
     try {
       final task = await downloads.create(
           url: 'https://www.youtube.com/watch?v=fBgKxsvl6M8',
           title: 'All Eyes On Me (Song Only)',
           artist: 'Bo Burnham - Topic');
-      await ytEngine.start();
+      await engine.start();
       final done =
           await _waitUntil(downloads, task.id, {DownloadTaskStatus.completed});
       expect(done.finalPath, endsWith('.m4a'));
       expect(done.trackId, isNotNull);
+      expect(fake.calls.any((c) => c.startsWith('download')), isTrue);
       final count = await TrackRepository(db).trackCount();
       expect(count, greaterThan(0));
     } finally {
-      await ytEngine.stop();
+      await engine.stop();
     }
   });
 
@@ -625,4 +566,48 @@ http://127.0.0.1:$port/c.wav
         await _waitUntil(downloads, task.id, {DownloadTaskStatus.completed});
     expect(done.progress, 1.0);
   });
+}
+
+/// Fake yt-dlp backend for engine tests: no network, deterministic output.
+class _FakeYtDlp implements YtDlpBackend {
+  _FakeYtDlp({this.entries, this.errorMessage, this.fileBytes});
+
+  final List<YtDlpEntry>? entries;
+  final String? errorMessage;
+  final List<int>? fileBytes;
+  final calls = <String>[];
+
+  @override
+  Future<void> ensureReady() async {}
+
+  @override
+  Future<List<YtDlpEntry>> list(String url) async {
+    calls.add('list $url');
+    if (errorMessage != null) throw YtDlpException(errorMessage!);
+    return entries ?? const [];
+  }
+
+  @override
+  Future<String> downloadAudio({
+    required String url,
+    required String workDir,
+    required String processKey,
+    required String expectedId,
+    bool Function()? shouldCancel,
+    void Function(YtDlpProgress)? onProgress,
+  }) async {
+    calls.add('download $url');
+    onProgress?.call(const YtDlpProgress(fraction: 0.5, line: '[download] 50.0%'));
+    // Real backends create the work dir themselves; mirror that contract.
+    Directory(workDir).createSync(recursive: true);
+    final out = File(p.join(workDir, '$expectedId.m4a'));
+    await out.writeAsBytes(fileBytes ?? _wavBytes());
+    return out.path;
+  }
+
+  @override
+  Future<void> cancel(String processKey) async {}
+
+  @override
+  void close() {}
 }

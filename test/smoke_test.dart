@@ -26,6 +26,7 @@ import 'package:music_player/database/repositories/download_repository.dart';
 import 'package:music_player/database/repositories/library_repository.dart';
 import 'package:music_player/database/repositories/playlist_settings_history_repository.dart';
 import 'package:music_player/features/downloader/domain/download_engine.dart';
+import 'package:music_player/features/downloader/domain/yt_dlp.dart';
 import 'package:music_player/features/media_import/domain/import_service.dart';
 import 'package:music_player/features/player/domain/playback_controller.dart';
 import 'package:music_player/shared/themes/app_theme.dart';
@@ -82,6 +83,8 @@ Future<ProviderContainer> makeContainer() async {
     diagnostics: DiagnosticsService(files: files, db: db),
     player: player,
     downloader: downloader,
+    // Constructor is cheap (setup is lazy); never used in this test.
+    ytDlp: createYtDlpBackend(appRoot: root),
   );
   return ProviderContainer(
     overrides: [appDepsProvider.overrideWithValue(deps)],

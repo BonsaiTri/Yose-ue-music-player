@@ -19,6 +19,10 @@ android {
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.musicplayer.music_player"
+        // The bundled yt-dlp runtime (Python) is large; ship arm64 only.
+        ndk {
+            abiFilters.add("arm64-v8a")
+        }
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
@@ -52,4 +56,6 @@ flutter {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    // Bundled yt-dlp runtime (private Python + yt-dlp) for YouTube downloads.
+    implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
 }

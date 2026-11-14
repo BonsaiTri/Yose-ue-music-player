@@ -19,6 +19,7 @@ import 'package:music_player/database/repositories/download_repository.dart';
 import 'package:music_player/database/repositories/library_repository.dart';
 import 'package:music_player/database/repositories/playlist_settings_history_repository.dart';
 import 'package:music_player/features/downloader/domain/download_engine.dart';
+import 'package:music_player/features/downloader/domain/yt_dlp.dart';
 import 'package:music_player/features/media_import/domain/import_service.dart';
 import 'package:music_player/features/player/domain/playback_controller.dart';
 import 'package:music_player/features/search/domain/search_provider.dart';
@@ -47,6 +48,7 @@ class AppDependencies {
     required this.diagnostics,
     required this.player,
     required this.downloader,
+    required this.ytDlp,
     this.sources = const SearchProviderRegistry(const []),
   });
 
@@ -69,6 +71,7 @@ class AppDependencies {
   final DiagnosticsService diagnostics;
   final PlaybackController player;
   final DownloadEngine downloader;
+  final YtDlpBackend ytDlp;
 
   /// Registered external music sources (spec §6.5). Empty by default —
   /// local-only search; providers are enabled at bootstrap.
@@ -233,11 +236,15 @@ Future<ProviderContainer> bootstrap() async {
   final maxConcurrent = (int.tryParse(await settings.get('downloads.maxConcurrent') ?? '')
           ?? AppConstants.maxConcurrentDownloads)
       .clamp(1, 10);
+  // YouTube downloads run through yt-dlp (bundled on Android, pinned
+  // official binary on desktop). Setup is lazy: first YouTube action.
+  final ytDlp = createYtDlpBackend(appRoot: root);
   final downloader = DownloadEngine(
     downloads: downloads,
     files: files,
     importer: importer,
     concurrency: maxConcurrent,
+    ytDlp: ytDlp,
   );
   await downloader.start();
 
@@ -258,6 +265,7 @@ Future<ProviderContainer> bootstrap() async {
     locks: locks,
     importer: importer,
     backup: backup,
+    ytDlp: ytDlp,
     diagnostics: DiagnosticsService(files: files, db: db),
     player: player,
     downloader: downloader,

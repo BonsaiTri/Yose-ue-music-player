@@ -97,15 +97,18 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen> {
                     _youtubeResult = null;
                     final deps = ref.watch(appDepsProvider);
                     try {
-                      final resolved = await deps.downloader.youtube
-                          .resolveVideo(
-                              'https://www.youtube.com/watch?v=jNQXAC9IVRw');
-                      final ok = mounted;
-                      if (ok) {
+                      // First run may extract the bundled yt-dlp runtime
+                      // (Android) or download the pinned desktop binary —
+                      // that is expected and only happens once.
+                      final yt = deps.ytDlp;
+                      await yt.ensureReady();
+                      final entries = await yt
+                          .list('https://www.youtube.com/watch?v=jNQXAC9IVRw');
+                      if (mounted) {
+                        final first = entries.first;
                         setState(() => _youtubeResult =
-                            'OK — resolved "${resolved.ref.title}" by '
-                            '${resolved.ref.artist} '
-                            '(${resolved.stream.extension} stream).');
+                            'OK — yt-dlp resolved "${first.title}"'
+                            '${first.channel != null ? ' by ${first.channel}' : ''}.');
                       }
                     } catch (e) {
                       if (mounted) {

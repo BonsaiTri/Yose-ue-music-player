@@ -24,9 +24,11 @@ library, metadata, and playback live on local disk.
   (`features/downloader/domain/download_engine.dart`) — resumable queue,
   concurrent transfers, pause/cancel, on-disk validation of imported audio,
   **M3U/M3U8 playlist download** (paste a playlist URL and every track is
-  queued automatically) and **YouTube video/playlist download** (resolves the
-  best directly-downloadable audio stream, re-resolved fresh at download
-  time; see `features/downloader/domain/youtube_resolver.dart`).
+  queued automatically) and **YouTube video/playlist download** via a bundled
+  **yt-dlp** backend (bundled Python runtime on Android; pinned, SHA-256
+  verified binary on desktop — YouTube's PO-token requirement makes plain
+  HTTP stream resolution impossible; see
+  `features/downloader/domain/yt_dlp.dart`).
 - **Resilience**: verified auto-backups (retention 5) at boot, a recovery
   screen that quarantines a corrupt database and restores the newest backup.
 
