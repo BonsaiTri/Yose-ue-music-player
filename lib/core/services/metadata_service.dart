@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 
 import 'package:music_player/core/errors/app_exceptions.dart';
@@ -259,24 +260,34 @@ class MetadataService {
 
   /// just_audio-only fallback: duration plus a title derived from the name.
   Future<ExtractedMetadata> _extractFallback(String path) async {
-    final player = AudioPlayer();
-    Duration duration = Duration.zero;
-    try {
-      await player.setAudioSource(AudioSource.file(path));
-      await player.processingStateStream
-          .firstWhere((s) => s == ProcessingState.ready || s == ProcessingState.idle)
-          .timeout(const Duration(seconds: 10), onTimeout: () => ProcessingState.idle);
-      duration = player.duration ?? Duration.zero;
-    } catch (e) {
-      AppLogger.warning('Fallback decode failed for $path: $e', tag: 'metadata');
-    } finally {
-      await player.dispose();
-    }
     final name = path.split(Platform.pathSeparator).last;
     final dot = name.lastIndexOf('.');
     final title = dot > 0 ? name.substring(0, dot) : name;
     final ext = dot > 0 ? name.substring(dot + 1).toLowerCase() : '';
-    return ExtractedMetadata(durationMs: duration.inMilliseconds, format: ext, title: title);
+
+    // The AudioPlayer constructor attaches an uncatchable listener to the
+    // AudioSession platform channel, so it must not be constructed when no
+    // Flutter binding exists (headless tests, pure-Dart embeds). In a real
+    // app the binding is always present.
+    Duration? duration;
+    try {
+      // ignore: unnecessary_null_check
+      ServicesBinding.instance;
+      final player = AudioPlayer();
+      try {
+        await player.setAudioSource(AudioSource.file(path));
+        await player.processingStateStream
+            .firstWhere((s) => s == ProcessingState.ready || s == ProcessingState.idle)
+            .timeout(const Duration(seconds: 10), onTimeout: () => ProcessingState.idle);
+        duration = player.duration ?? Duration.zero;
+      } finally {
+        await player.dispose();
+      }
+    } catch (e) {
+      AppLogger.warning('Fallback decode failed for $path: $e', tag: 'metadata');
+    }
+    return ExtractedMetadata(
+        durationMs: duration?.inMilliseconds ?? 0, format: ext, title: title);
   }
 
   /// Streaming SHA-256 of a file, chunked to keep memory flat.
