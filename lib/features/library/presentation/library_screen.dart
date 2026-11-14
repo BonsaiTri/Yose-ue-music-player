@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_player/app/bootstrap.dart';
 import 'package:music_player/database/database.dart';
 import 'package:music_player/features/media_import/presentation/import_picker.dart';
+import 'package:music_player/shared/widgets/add_to_playlist_sheet.dart';
 import 'package:music_player/shared/widgets/empty_view.dart';
 import 'package:music_player/shared/widgets/track_list_tile.dart';
 
@@ -141,9 +142,24 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
                     return TrackListTile(
                       track: track,
                       onTap: () => ref.read(playerProvider).playQueue(_tracks, startIndex: i),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.favorite),
-                        onPressed: () => ref.read(appDepsProvider).tracks.toggleFavorite(track.id),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.playlist_add),
+                            tooltip: 'Add to playlist',
+                            onPressed: () =>
+                                showAddToPlaylistSheet(context, [track.id]),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.favorite),
+                            tooltip: 'Favorite',
+                            onPressed: () => ref
+                                .read(appDepsProvider)
+                                .tracks
+                                .toggleFavorite(track.id),
+                          ),
+                        ],
                       ),
                       onRemove: (deleteFile) async {
                         await ref

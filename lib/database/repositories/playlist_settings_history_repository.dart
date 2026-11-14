@@ -81,20 +81,17 @@ class PlaylistRepository {
         await _reindex(playlistId);
       });
 
-  /// Reorders tracks to the given id sequence.
+  /// Reorders tracks to the given id sequence. A full sequence rewrites
+  /// the whole order; a partial sequence moves the named tracks to the
+  /// given positions and keeps the rest in relative order.
   Future<void> reorder(String playlistId, List<String> orderedTrackIds) =>
       db.transaction(() async {
-        final existing = await (db.select(db.playlistTracks)
-              ..where((pt) => pt.playlistId.equals(playlistId)))
-            .get();
-        for (var i = 0; i < existing.length && i < orderedTrackIds.length; i++) {
-          final row = existing[i];
-          if (row.trackId != orderedTrackIds[i]) {
-            await (db.update(db.playlistTracks)
-                  ..where((pt) =>
-                      pt.playlistId.equals(playlistId) & pt.trackId.equals(row.trackId)))
-                .write(PlaylistTracksCompanion(position: Value(i)));
-          }
+        for (var i = 0; i < orderedTrackIds.length; i++) {
+          await (db.update(db.playlistTracks)
+                ..where((pt) =>
+                    pt.playlistId.equals(playlistId) &
+                    pt.trackId.equals(orderedTrackIds[i])))
+              .write(PlaylistTracksCompanion(position: Value(i)));
         }
         await _reindex(playlistId);
       });
