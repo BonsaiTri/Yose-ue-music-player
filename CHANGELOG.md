@@ -25,6 +25,11 @@
   `FormatException`; the app extracts the first line that looks like a
   plain `http(s)` link and the engine rejects multi-line/whitespace URLs
   with a clear message.
+- **YouTube playlist listing now handles line-delimited JSON**: yt-dlp
+  emits one JSON entry per line for playlists served by the modern
+  playlist API (instead of a single playlist object). Such playlists
+  previously failed with a cryptic parse error; every track is now
+  queued (with channel and thumbnail metadata).
 
 ## 0.3.4
 

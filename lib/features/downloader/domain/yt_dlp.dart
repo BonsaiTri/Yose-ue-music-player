@@ -99,32 +99,83 @@ YtDlpBackend createYtDlpBackend({required String appRoot}) {
 // Shared JSON parsing
 // --------------------------------------------------------------------------
 
-/// Parses yt-dlp's `--flat-playlist --dump-json` output. A single video
-/// yields one object; a playlist yields `{"_type": "playlist", ...}` with
-/// an `entries` list.
+/// Parses yt-dlp's `--flat-playlist --dump-json` output. Depending on the
+/// playlist type, yt-dlp emits:
+/// * a single object (one video),
+/// * `{"_type": "playlist", "entries": [...]}` (classic playlists),
+/// * a top-level array of entry objects, or
+/// * **line-delimited JSON** — one entry object per line (the modern
+///   playlist API; e.g. playlists with hundreds of tracks).
+/// Non-JSON lines (warnings, stderr noise merged by the Android backend)
+/// are skipped.
 List<YtDlpEntry> parseYtDlpListing(String stdout) {
-  final decoded = jsonDecode(stdout);
-  List<Map<String, dynamic>> raw;
+  final raw = stdout.trim();
+  if (raw.isEmpty) return const [];
+  final whole = _entriesFromJson(() => jsonDecode(raw));
+  if (whole != null) {
+    return _toEntries(whole);
+  }
+  // Whole-string decode failed: try line-delimited JSON.
+  final rawEntries = <Map<String, dynamic>>[];
+  for (final line in raw.split('\n')) {
+    final l = line.trim();
+    if (l.isEmpty) continue;
+    final entries = _entriesFromJson(() => jsonDecode(l));
+    if (entries != null) rawEntries.addAll(entries);
+  }
+  return _toEntries(rawEntries);
+}
+
+/// Runs [decode] and normalizes the result to a list of raw entry maps.
+/// Returns null when the decode fails or the document is not an entry
+/// container (caller falls back to line-by-line parsing).
+List<Map<String, dynamic>>? _entriesFromJson(Object? Function() decode) {
+  Object? decoded;
+  try {
+    decoded = decode();
+  } on FormatException {
+    return null;
+  }
   if (decoded is List) {
-    // --flat-playlist emits a top-level array of entry objects.
-    raw = decoded.whereType<Map<String, dynamic>>().toList();
-  } else if (decoded is Map<String, dynamic>) {
+    return decoded.whereType<Map<String, dynamic>>().toList();
+  }
+  if (decoded is Map<String, dynamic>) {
     final entries = decoded['entries'];
-    raw = entries is List
+    return entries is List
         ? entries.whereType<Map<String, dynamic>>().toList()
         : [decoded];
-  } else {
-    raw = const [];
   }
-  return raw
-      .where((e) => e['id'] is String && (e['id'] as String).isNotEmpty)
-      .map((e) => YtDlpEntry(
-            id: e['id'] as String,
-            title: (e['title'] as String?) ?? e['id'] as String,
-            channel: e['uploader'] as String?,
-            thumbnail: e['thumbnail'] as String?,
-          ))
-      .toList();
+  return null;
+}
+
+List<YtDlpEntry> _toEntries(List<Map<String, dynamic>> raw) {
+  final seen = <String>{};
+  final out = <YtDlpEntry>[];
+  for (final e in raw) {
+    final id = e['id'];
+    if (id is! String || id.isEmpty || !seen.add(id)) continue;
+    String? thumb = e['thumbnail'] as String?;
+    if (thumb == null) {
+      // Flat entries carry a `thumbnails` array instead of a single URL.
+      final thumbs = e['thumbnails'];
+      if (thumbs is List) {
+        for (final t in thumbs.whereType<Map<String, dynamic>>()) {
+          final u = t['url'];
+          if (u is String && u.isNotEmpty) {
+            thumb = u;
+            break;
+          }
+        }
+      }
+    }
+    out.add(YtDlpEntry(
+      id: id,
+      title: (e['title'] as String?) ?? id,
+      channel: e['uploader'] as String? ?? e['channel'] as String?,
+      thumbnail: thumb,
+    ));
+  }
+  return out;
 }
 
 /// Picks the newly created audio file for [expectedId] in [dir].

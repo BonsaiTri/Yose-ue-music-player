@@ -45,7 +45,67 @@ void main() {
 
     test('garbage output yields an empty list, not an exception', () {
       expect(parseYtDlpListing('{}'), isEmpty);
-      expect(() => parseYtDlpListing('not json'), throwsFormatException);
+      expect(parseYtDlpListing('not json'), isEmpty);
+      expect(parseYtDlpListing(''), isEmpty);
+    });
+
+    test('line-delimited JSON (modern playlist API) parses every entry', () {
+      // yt-dlp emits one JSON object per line for some playlist types
+      // (observed with a 187-track playlist).
+      final stdout = [
+        jsonEncode({
+          'id': 'fBgKxsvl6M8',
+          'title': 'All Eyes On Me (Song Only)',
+          'uploader': 'Bo Burnham - Topic',
+          'thumbnail': 'https://i.ytimg.com/vi/fBgKxsvl6M8/hqdefault.jpg',
+        }),
+        jsonEncode({
+          'id': 'DPe2diiGJRE',
+          'title': 'Wellerman (Sea Shanty)',
+          'uploader': 'The Longest Time',
+        }),
+        jsonEncode({'id': 'YDXaXDU_3Wc', 'title': "C'est la vie"}),
+      ].join('\n');
+      final entries = parseYtDlpListing(stdout);
+      expect(entries.map((e) => e.id), [
+        'fBgKxsvl6M8',
+        'DPe2diiGJRE',
+        'YDXaXDU_3Wc',
+      ]);
+      expect(entries.first.thumbnail, isNotNull);
+    });
+
+    test('flat entries use the thumbnails array (no top-level thumbnail)', () {
+      final stdout = jsonEncode([
+        {
+          'id': 'fBgKxsvl6M8',
+          'title': 'All Eyes On Me (Song Only)',
+          'uploader': 'boburnham',
+          'thumbnails': [
+            {'url': 'https://i.ytimg.com/vi/fBgKxsvl6M8/hqdefault.jpg', 'width': 168, 'height': 94},
+            {'url': 'https://i.ytimg.com/vi/fBgKxsvl6M8/hq720.jpg', 'width': 720, 'height': 270},
+          ],
+        },
+      ]);
+      final entries = parseYtDlpListing(stdout);
+      expect(entries.single.thumbnail, contains('i.ytimg.com'));
+      expect(entries.single.channel, 'boburnham');
+    });
+
+    test('NDJSON with interleaved warning lines and duplicates is tolerated',
+        () {
+      final stdout = [
+        'WARNING: [youtube] some warning noise',
+        jsonEncode({'id': 'aaaaaaaaaaa', 'title': 'First Song'}),
+        'ERROR: [youtube] bbbbbbbbbbb: unable to extract (skipped)',
+        jsonEncode({'id': 'bbbbbbbbbbb', 'title': 'Second Song'}),
+        jsonEncode({'id': 'bbbbbbbbbbb', 'title': 'Second Song (duplicate)'}),
+        jsonEncode({'title': 'entry without id'}),
+        '',
+      ].join('\n');
+      final entries = parseYtDlpListing(stdout);
+      expect(entries.map((e) => e.id), ['aaaaaaaaaaa', 'bbbbbbbbbbb']);
+      expect(entries.map((e) => e.title), ['First Song', 'Second Song']);
     });
   });
 }
