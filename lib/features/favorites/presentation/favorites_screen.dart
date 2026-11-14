@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:music_player/app/bootstrap.dart';
 import 'package:music_player/database/database.dart';
+import 'package:music_player/shared/widgets/empty_view.dart';
 import 'package:music_player/shared/widgets/track_list_tile.dart';
 
 class FavoritesScreen extends ConsumerStatefulWidget {
@@ -31,7 +32,11 @@ class _FavoritesScreenState extends ConsumerState<FavoritesScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Favorites')),
       body: _tracks.isEmpty
-          ? const Center(child: Text('No favorites yet.'))
+          ? const EmptyView(
+              icon: Icons.favorite_outline,
+              title: 'No favorites yet',
+              message: 'Tap the heart on any track to save it here.',
+            )
           : ListView.builder(
               itemCount: _tracks.length,
               itemBuilder: (_, i) {

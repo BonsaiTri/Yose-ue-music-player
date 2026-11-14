@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.3.0
+
+### Renamed & rebranded
+- The app is now **Yose-ue Music Player** (Android label, macOS/Windows/Linux
+  window titles, in-app screens, README).
+- New app logo on every platform: Android launcher icons, macOS app icon,
+  Windows `.ico`, Linux icon, and in-app (Home header, Settings → About).
+
+### Usability overhaul
+- **Simpler navigation**: five primary tabs (Home, Library, Search, Downloads,
+  Settings) on both the mobile bottom bar and the desktop sidebar. Albums,
+  Artists, Genres, Playlists, Favorites, History and Storage live one tap away
+  on the Home hub instead of crowding the navigation.
+- **New Home screen**: shows your library at a glance (songs/albums/artists
+  counts), one-tap **Play all** and **Shuffle**, your recently played tracks,
+  and browse cards with live counts.
+- **Onboarding**: a first-run home screen with the logo and a clear
+  "Import music" call to action (plus a drag-and-drop hint on desktop).
+- **Import chooser**: importing now asks *files* vs *folder* (folders are
+  scanned recursively), available from Home and Library.
+- **Friendly empty states** on Library, Favorites, Playlists, Albums, Artists,
+  Genres and History — each explains what to do next.
+- Search screen no longer shows the source picker when no external source
+  is registered.
+- Settings → About now shows the logo, app name and version.
+
 ## 0.2.0
 
 ### New features

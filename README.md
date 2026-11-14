@@ -1,4 +1,4 @@
-# Music Player
+# Yose-ue Music Player
 
 Offline-first, cross-platform music player built with Flutter/Dart.
 Targets Windows, macOS, Linux, and Android. No cloud dependency — the entire

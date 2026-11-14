@@ -28,7 +28,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   Win32Window::Point origin(10, 10);
   // Generous default for a library-browsing UI; the layout adapts down.
   Win32Window::Size size(1400, 860);
-  if (!window.Create(L"Music Player", origin, size)) {
+  if (!window.Create(L"Yose-ue Music Player", origin, size)) {
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);

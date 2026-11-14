@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:music_player/app/bootstrap.dart';
+import 'package:music_player/shared/widgets/empty_view.dart';
 import 'package:music_player/shared/widgets/track_list_tile.dart';
 
 /// Listening history: recently played tracks and counts, with clearing.
@@ -43,7 +44,11 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
         ],
       ),
       body: _recent.isEmpty
-          ? const Center(child: Text('No listening history.'))
+          ? const EmptyView(
+              icon: Icons.history_outlined,
+              title: 'Nothing played yet',
+              message: 'Tracks you play will show up here.',
+            )
           : ListView.builder(
               itemCount: _recent.length,
               itemBuilder: (_, i) {

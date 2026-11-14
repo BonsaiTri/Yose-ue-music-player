@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Yose-ue Music Player
+Comment=Offline-first music player
+GenericName=Music Player
+Exec=yose_ue_music_player
+Terminal=false
+Icon=appicon
+Categories=Audio;Video;Player;
+Type=Application

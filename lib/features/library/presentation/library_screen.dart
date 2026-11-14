@@ -1,9 +1,10 @@
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:music_player/app/bootstrap.dart';
 import 'package:music_player/database/database.dart';
+import 'package:music_player/features/media_import/presentation/import_picker.dart';
+import 'package:music_player/shared/widgets/empty_view.dart';
 import 'package:music_player/shared/widgets/track_list_tile.dart';
 
 /// All-songs view with sorting and drag-drop/file-picker import.
@@ -68,28 +69,11 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   }
 
   Future<void> _import() async {
-    final deps = ref.read(appDepsProvider);
     setState(() => _importing = true);
-    try {
-      final result = await FilePicker.platform.pickFiles(type: FileType.any);
-      if (result == null || result.files.isEmpty) return;
-      final paths = result.files.map((f) => f.path).where((p) => p != null).cast<String>().toList();
-      final importResult = await deps.importer.importPaths(paths,
-          onProgress: (done, total, current) => debugPrint('Importing $done/$total'));
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Imported ${importResult.added} track(s); '
-              '${importResult.duplicates} duplicate(s); ${importResult.errors} error(s)'),
-        ));
-      }
-      await _load();
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Import failed: $e')));
-      }
-    } finally {
-      if (mounted) setState(() => _importing = false);
-    }
+    final result = await pickAndImport(context, ref);
+    if (!mounted) return;
+    setState(() => _importing = false);
+    if (result != null) await _load();
   }
 
   @override
@@ -128,7 +112,17 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
       body: _loading && _tracks.isEmpty
           ? const Center(child: CircularProgressIndicator())
           : _tracks.isEmpty
-              ? const Center(child: Text('No music yet. Import files to get started.'))
+              ? EmptyView(
+                  icon: Icons.library_music_outlined,
+                  title: 'Your library is empty',
+                  message:
+                      'Import your audio files or a whole folder to start listening.',
+                  action: FilledButton.icon(
+                    onPressed: _importing ? null : _import,
+                    icon: const Icon(Icons.file_upload_outlined),
+                    label: const Text('Import music'),
+                  ),
+                )
               : ListView.builder(
                   // Extra item is a spinner footer shown while a page loads.
                   itemCount: _tracks.length + (_loadingMore ? 1 : 0),

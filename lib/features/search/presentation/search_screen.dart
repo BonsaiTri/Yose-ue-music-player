@@ -123,42 +123,45 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       appBar: AppBar(title: const Text('Search')),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-            child: Row(
-              children: [
-                Expanded(
-                  child: DropdownButtonHideUnderline(
-                    child: ButtonTheme(
-                      height: 36,
-                      child: DropdownButton<String>(
-                        value: _sourceId,
-                        isExpanded: true,
-                        items: [
-                          const DropdownMenuItem(
-                              value: 'library', child: Text('Library')),
-                          for (final s in sources)
-                            DropdownMenuItem(value: s.id, child: Text(s.label)),
-                        ],
-                        onChanged: (v) {
-                          if (v == null) return;
-                          setState(() {
-                            _sourceId = v;
-                            _results = const [];
-                            _remoteResults = const [];
-                            _error = null;
-                          });
-                          if (_controller.text.trim().isNotEmpty) {
-                            _search(_controller.text);
-                          }
-                        },
+          // The source picker only appears when an external source is
+          // registered — with just the local library it is noise.
+          if (sources.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonHideUnderline(
+                      child: ButtonTheme(
+                        height: 36,
+                        child: DropdownButton<String>(
+                          value: _sourceId,
+                          isExpanded: true,
+                          items: [
+                            const DropdownMenuItem(
+                                value: 'library', child: Text('Library')),
+                            for (final s in sources)
+                              DropdownMenuItem(value: s.id, child: Text(s.label)),
+                          ],
+                          onChanged: (v) {
+                            if (v == null) return;
+                            setState(() {
+                              _sourceId = v;
+                              _results = const [];
+                              _remoteResults = const [];
+                              _error = null;
+                            });
+                            if (_controller.text.trim().isNotEmpty) {
+                              _search(_controller.text);
+                            }
+                          },
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
           Padding(
             padding: const EdgeInsets.all(12),
             child: TextField(

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:music_player/app/bootstrap.dart';
 import 'package:music_player/database/database.dart';
+import 'package:music_player/shared/widgets/empty_view.dart';
 import 'package:music_player/shared/widgets/track_list_tile.dart';
 
 /// Artists list; tapping an artist plays their catalog in order.
@@ -32,7 +33,11 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Artists')),
       body: _artists.isEmpty
-          ? const Center(child: Text('No artists in library.'))
+          ? const EmptyView(
+              icon: Icons.person_outline,
+              title: 'No artists yet',
+              message: 'Artists appear here once you import music.',
+            )
           : ListView.builder(
               itemCount: _artists.length,
               itemBuilder: (_, i) {

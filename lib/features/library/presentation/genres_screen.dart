@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:music_player/app/bootstrap.dart';
 import 'package:music_player/database/database.dart';
+import 'package:music_player/shared/widgets/empty_view.dart';
 
 /// Genres list; tapping a genre plays its catalog in alphabetical order.
 class GenresScreen extends ConsumerStatefulWidget {
@@ -31,7 +32,11 @@ class _GenresScreenState extends ConsumerState<GenresScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Genres')),
       body: _genres.isEmpty
-          ? const Center(child: Text('No genres in library.'))
+          ? const EmptyView(
+              icon: Icons.local_offer_outlined,
+              title: 'No genres yet',
+              message: 'Genres appear here once you import music with tags.',
+            )
           : ListView.builder(
               itemCount: _genres.length,
               itemBuilder: (_, i) {

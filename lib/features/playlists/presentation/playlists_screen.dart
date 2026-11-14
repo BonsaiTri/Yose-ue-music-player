@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_player/app/bootstrap.dart';
 import 'package:music_player/database/database.dart';
 import 'package:music_player/features/library/presentation/artists_screen.dart';
+import 'package:music_player/shared/widgets/empty_view.dart';
 
 class PlaylistsScreen extends ConsumerStatefulWidget {
   const PlaylistsScreen({super.key});
@@ -53,7 +54,11 @@ class _PlaylistsScreenState extends ConsumerState<PlaylistsScreen> {
       appBar: AppBar(title: const Text('Playlists')),
       floatingActionButton: FloatingActionButton(onPressed: _create, child: const Icon(Icons.add)),
       body: _playlists.isEmpty
-          ? const Center(child: Text('No playlists yet.'))
+          ? const EmptyView(
+              icon: Icons.playlist_play_outlined,
+              title: 'No playlists yet',
+              message: 'Tap + to create a playlist and organize your favorite tracks.',
+            )
           : ListView.builder(
               itemCount: _playlists.length,
               itemBuilder: (_, i) {

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:music_player/app/bootstrap.dart';
 import 'package:music_player/shared/widgets/artwork_image.dart';
+import 'package:music_player/shared/widgets/empty_view.dart';
 
 /// Albums grid.
 class AlbumsScreen extends ConsumerStatefulWidget {
@@ -31,7 +32,11 @@ class _AlbumsScreenState extends ConsumerState<AlbumsScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Albums')),
       body: _albums.isEmpty
-          ? const Center(child: Text('No albums in library.'))
+          ? const EmptyView(
+              icon: Icons.album_outlined,
+              title: 'No albums yet',
+              message: 'Albums appear here once you import music.',
+            )
           : GridView.builder(
               padding: const EdgeInsets.all(16),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(

@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 
 import 'package:music_player/app/app.dart';
 import 'package:music_player/app/bootstrap.dart';
+import 'package:music_player/core/constants/app_constants.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -226,6 +227,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             padding: EdgeInsets.all(16),
             child: Text('About', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
+          Center(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.asset('assets/logo/logo.jpg',
+                  height: 96, width: 96, fit: BoxFit.cover),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Center(
+            child: Text(AppConstants.appName,
+                style: Theme.of(context).textTheme.titleMedium),
+          ),
+          const SizedBox(height: 4),
+          Center(
+            child: Text('Version ${AppConstants.appVersion} · offline-first',
+                style: Theme.of(context).textTheme.bodySmall
+                    ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          ),
+          const SizedBox(height: 16),
           const ListTile(
             title: Text('Application data'),
             subtitle: Text('Resolved per-platform; no absolute paths hardcoded.'),
