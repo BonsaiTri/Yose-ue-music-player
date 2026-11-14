@@ -87,21 +87,24 @@ void main() {
   late int port;
 
   List<int>? serveBytes; // per-test body
+  Map<String, List<int>>? routeBytes; // per-path bodies (playlist tests)
 
   setUpAll(() async {
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     port = server.port;
     serveBytes = null;
     server.listen((req) async {
-      final body = serveBytes;
+      final body = routeBytes?[req.uri.path] ?? serveBytes;
       if (body == null) {
         req.response.statusCode = 404;
         await req.response.close();
         return;
       }
       req.response.statusCode = 200;
-      req.response.headers.contentType =
-          ContentType.parse('audio/wav');
+      req.response.headers.contentType = req.uri.path.endsWith('.m3u8') ||
+              req.uri.path.endsWith('.m3u')
+          ? ContentType.parse('audio/x-mpegurl')
+          : ContentType.parse('audio/wav');
       req.response.contentLength = body.length;
       // Serve in small chunks with a small delay so the transfer is slow
       // enough to observe in-flight cancel.
@@ -120,6 +123,7 @@ void main() {
   });
 
   setUp(() async {
+    routeBytes = null;
     temp = await Directory.systemTemp.createTemp('dl_engine_');
     files = FileService(temp.path);
     await files.ensureDirectories();
@@ -260,6 +264,65 @@ void main() {
     final failed =
         await _waitUntil(downloads, task.id, {DownloadTaskStatus.failed});
     expect(failed.error, contains('http or https'));
+  });
+
+  test('M3U8 playlist queues every track and they all complete', () async {
+    final wav = _wavBytes();
+    final playlist = '''
+#EXTM3U
+#EXTINF:10,Artist A - Track One
+/a.wav
+#EXTINF:10,Track Two
+/b.wav
+#EXTINF:10,Artist B - Track Three
+http://127.0.0.1:$port/c.wav
+#EXTINF:5,
+/sub.m3u8
+''';
+    routeBytes = {
+      '/playlist.m3u8': utf8.encode(playlist),
+      '/a.wav': wav,
+      '/b.wav': wav,
+      '/c.wav': wav,
+    };
+    final summary = await engine
+        .queuePlaylist('http://127.0.0.1:$port/playlist.m3u8');
+    expect(summary.queued, 3);
+    await engine.start();
+
+    // All three tracks complete; the nested playlist is not queued.
+    final deadline = DateTime.now().add(const Duration(seconds: 60));
+    List<DownloadTask> finished;
+    do {
+      final history = await downloads.history(limit: 50);
+      finished = history
+          .where((t) => t.status == DownloadTaskStatus.completed)
+          .toList();
+      if (finished.length >= 3 || !DateTime.now().isBefore(deadline)) break;
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    } while (finished.length < 3);
+    expect(finished.length, 3);
+    final byTitle = {
+      for (final t in finished) t.title: t
+    };
+    expect(byTitle['Track One']!.artist, 'Artist A');
+    expect(byTitle['Track Two']!.artist, 'Unknown Artist');
+    expect(byTitle['Track Three']!.artist, 'Artist B');
+    expect(byTitle['Track One']!.bytesDone, wav.length);
+    for (final t in finished) {
+      expect(File(t.finalPath!).existsSync(), isTrue);
+      expect(t.trackId, isNotNull);
+    }
+  });
+
+  test('playlist with no playable tracks is rejected', () async {
+    routeBytes = {
+      '/empty.m3u8': utf8.encode('#EXTM3U\n# nothing here\n'),
+    };
+    expect(
+      engine.queuePlaylist('http://127.0.0.1:$port/empty.m3u8'),
+      throwsA(isA<DownloadTaskException>()),
+    );
   });
 
   test('progress is persisted while downloading', () async {

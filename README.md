@@ -22,7 +22,9 @@ library, metadata, and playback live on local disk.
   permission flow for file imports.
 - **Downloads**: pluggable source protocol with a queue executor
   (`features/downloader/domain/download_engine.dart`) — resumable queue,
-  concurrent transfers, pause/cancel, on-disk validation of imported audio.
+  concurrent transfers, pause/cancel, on-disk validation of imported audio,
+  and **M3U/M3U8 playlist download** (paste a playlist URL and every track
+  is queued automatically).
 - **Resilience**: verified auto-backups (retention 5) at boot, a recovery
   screen that quarantines a corrupt database and restores the newest backup.
 

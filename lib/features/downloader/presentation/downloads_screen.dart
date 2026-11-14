@@ -65,10 +65,17 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
     }
     setState(() => _adding = true);
     try {
-      await ref
-          .read(appDepsProvider)
-          .downloader
-          .queue(url: uri.toString(), title: _titleFromUri(uri));
+      final engine = ref.read(appDepsProvider).downloader;
+      final path = uri.path.toLowerCase();
+      if (path.endsWith('.m3u') || path.endsWith('.m3u8')) {
+        final summary = await engine.queuePlaylist(uri.toString());
+        _showSnack(summary.ignored > 0
+            ? 'Queued ${summary.queued} tracks from playlist '
+                '(${summary.ignored} skipped)'
+            : 'Queued ${summary.queued} tracks from playlist');
+      } else {
+        await engine.queue(url: uri.toString(), title: _titleFromUri(uri));
+      }
       _urlController.clear();
       await _load();
     } catch (e) {
@@ -121,6 +128,7 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
       body: Column(
         children: [
           _addForm(),
+          _addFormHint(),
           Expanded(
             child: _active.isEmpty &&
                     _queued.isEmpty &&
@@ -185,7 +193,7 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
               controller: _urlController,
               keyboardType: TextInputType.url,
               decoration: const InputDecoration(
-                labelText: 'Media URL (http/https)',
+                labelText: 'Track URL or playlist (.m3u8)',
                 prefixIcon: Icon(Icons.link),
                 border: OutlineInputBorder(),
                 isDense: true,
@@ -204,6 +212,18 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
             onPressed: _adding ? null : _add,
           ),
         ],
+      ),
+    );
+  }
+
+  /// Hint below the form explaining what URLs are accepted.
+  Widget _addFormHint() {
+    return const Padding(
+      padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Text(
+            'Paste a direct track URL, or an M3U/M3U8 playlist URL to queue every track in it.'),
       ),
     );
   }

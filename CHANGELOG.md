@@ -2,6 +2,12 @@
 
 ## 0.3.0
 
+### New features
+- **Playlist downloads**: on the Downloads screen, paste an M3U/M3U8
+  playlist URL and every track in it is queued as an individual download
+  (titles/artists read from `#EXTINF` tags, relative URLs resolved, nested
+  playlists skipped, 200-track cap).
+
 ### Renamed & rebranded
 - The app is now **Yose-ue Music Player** (Android label, macOS/Windows/Linux
   window titles, in-app screens, README).

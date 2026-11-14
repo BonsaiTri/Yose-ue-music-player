@@ -27,6 +27,28 @@ class DownloadTaskException implements Exception {
   String toString() => 'DownloadTaskException: $message';
 }
 
+/// Outcome of expanding a playlist into individual download tasks.
+class PlaylistQueueSummary {
+  const PlaylistQueueSummary({required this.queued, required this.ignored});
+
+  /// Tracks enqueued as individual download tasks.
+  final int queued;
+
+  /// Entries that could not be queued (duplicates, malformed, …).
+  final int ignored;
+}
+
+/// One parsed entry of an M3U/M3U8 playlist.
+class _M3uEntry {
+  const _M3uEntry(this.url, this.title, this.artist);
+  final String url;
+  final String title;
+  final String artist;
+}
+
+/// Hard cap on entries queued from a single playlist.
+const int _maxPlaylistEntries = 200;
+
 /// Milestone 4: background download queue executor.
 ///
 /// Per-task lifecycle (persisted to `download_tasks`):
@@ -105,6 +127,114 @@ class DownloadEngine {
         trackId: trackId,
         priority: priority,
       );
+
+  /// Enqueues every track in an M3U/M3U8 playlist at [url] as individual
+  /// download tasks. Relative URLs are resolved against the playlist URL;
+  /// nested playlists are skipped. Returns the queue summary.
+  Future<PlaylistQueueSummary> queuePlaylist(String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
+      throw const DownloadTaskException('Playlist URL must be http or https');
+    }
+    final body = await _fetchPlaylist(uri);
+    final entries = _parseM3u(body, base: uri);
+    if (entries.isEmpty) {
+      throw const DownloadTaskException('No playable tracks found in playlist');
+    }
+    var queued = 0;
+    var ignored = 0;
+    for (final entry in entries) {
+      try {
+        await downloads.create(url: entry.url, title: entry.title, artist: entry.artist);
+        queued++;
+      } catch (_) {
+        ignored++;
+      }
+    }
+    if (queued == 0) {
+      throw const DownloadTaskException('Could not queue any tracks from playlist');
+    }
+    AppLogger.info('Queued $queued tracks from playlist $url', tag: 'download');
+    return PlaylistQueueSummary(queued: queued, ignored: ignored);
+  }
+
+  /// Fetches a playlist body (bounded to 2 MB).
+  Future<String> _fetchPlaylist(Uri uri) async {
+    final client = _client ?? HttpClient()..connectionTimeout = _connectTimeout;
+    _client = client;
+    final req = await client.getUrl(uri).timeout(_requestTimeout);
+    final res = await req.close().timeout(_requestTimeout);
+    if (res.statusCode != 200) {
+      await res.drain();
+      throw DownloadTaskException('Playlist fetch failed: HTTP ${res.statusCode}');
+    }
+    final chunks = <List<int>>[];
+    var total = 0;
+    await for (final chunk in res) {
+      total += chunk.length;
+      if (total > 2 * 1024 * 1024) {
+        await res.drain();
+        throw const DownloadTaskException('Playlist too large (max 2 MB)');
+      }
+      chunks.add(chunk);
+    }
+    return String.fromCharCodes(chunks.expand((c) => c));
+  }
+
+  /// Parses M3U/M3U8 [body] into playable entries (max [_maxPlaylistEntries]).
+  /// `#EXTINF:dur,Artist - Title` labels the following URL line; plain URL
+  /// lines are titled from their file name.
+  List<_M3uEntry> _parseM3u(String body, {required Uri base}) {
+    final entries = <_M3uEntry>[];
+    String? pendingTitle;
+    String? pendingArtist;
+    for (final raw in body.split(RegExp(r'\r?\n'))) {
+      final line = raw.trim();
+      if (line.isEmpty) continue;
+      if (line.startsWith('#')) {
+        final m =
+            RegExp(r'^#EXTINF:\s*[-\d.]*\s*,\s*(.*)$').firstMatch(line);
+        if (m == null) continue; // #EXTM3U, #EXT, …
+        final label = m.group(1)!.trim();
+        // Common "Artist - Title" convention.
+        final dash = label.indexOf(' - ');
+        if (dash > 0) {
+          pendingArtist = label.substring(0, dash).trim();
+          pendingTitle = label.substring(dash + 3).trim();
+        } else {
+          pendingArtist = null;
+          pendingTitle = label;
+        }
+        continue;
+      }
+      final resolved = Uri.tryParse(line);
+      if (resolved == null || resolved.path.isEmpty) continue;
+      final abs = resolved.hasScheme ? resolved : base.resolve(line);
+      final path = abs.path.toLowerCase();
+      // Nested playlists are not downloadable as files.
+      if (path.endsWith('.m3u') || path.endsWith('.m3u8')) {
+        pendingTitle = null;
+        pendingArtist = null;
+        continue;
+      }
+      final title =
+          (pendingTitle != null && pendingTitle.isNotEmpty) ? pendingTitle : _titleFromUrl(abs);
+      entries.add(_M3uEntry(abs.toString(), title, pendingArtist ?? 'Unknown Artist'));
+      pendingTitle = null;
+      pendingArtist = null;
+      if (entries.length >= _maxPlaylistEntries) break;
+    }
+    return entries;
+  }
+
+  String _titleFromUrl(Uri uri) {
+    final name = p.basenameWithoutExtension(uri.path);
+    try {
+      return Uri.decodeComponent(name);
+    } catch (_) {
+      return name;
+    }
+  }
 
   /// Cancels a queued or in-flight task.
   Future<bool> cancel(String id) async {
