@@ -143,6 +143,12 @@ class SettingsRepository {
           .insert(AppSetting(key: key, value: value),
               onConflict: DoUpdate((old) => AppSettingsCompanion(value: Value(value))));
 
+  Future<int> delete(String key) async {
+    final stmt = db.delete(db.appSettings)
+      ..where((s) => s.key.equals(key));
+    return stmt.go();
+  }
+
   Future<Map<String, String>> all() async {
     final rows = await db.select(db.appSettings).get();
     return {for (final r in rows) r.key: r.value};

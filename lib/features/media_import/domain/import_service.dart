@@ -198,23 +198,48 @@ class ImportService {
   }
 
   /// Registers an already-downloaded file into the library (atomic import).
-  Future<Track?> registerDownloadedFile(String path, {String? sourceId, String? sourceType}) async {
+  ///
+  /// Downloaded files (e.g. YouTube audio via yt-dlp) frequently carry no
+  /// embedded metadata or artwork. Callers may supply overrides collected
+  /// from the source (title, artist/channel, thumbnail bytes); embedded
+  /// values win when present, otherwise the overrides are used.
+  Future<Track?> registerDownloadedFile(
+    String path, {
+    String? sourceId,
+    String? sourceType,
+    String? titleOverride,
+    String? artistOverride,
+    List<int>? artworkBytes,
+    String? artworkMime,
+  }) async {
     if (!File(path).existsSync() || !files.isAudioFile(path)) return null;
     await locks.acquireShared(path, 'indexer');
     try {
       final hash = await metadata.fileHash(path);
       final meta = await metadata.extract(path);
       String? artworkId;
-      if (meta.artworkBytes != null && meta.artworkBytes!.isNotEmpty) {
+      final embeddedArt = (meta.artworkBytes != null && meta.artworkBytes!.isNotEmpty)
+          ? meta.artworkBytes!
+          : null;
+      final artSource = embeddedArt ??
+          ((artworkBytes != null && artworkBytes.isNotEmpty) ? artworkBytes : null);
+      if (artSource != null) {
         try {
           artworkId = (await artwork.store(
-            bytes: meta.artworkBytes!,
-            mime: meta.artworkMime ?? 'image/jpeg',
+            bytes: artSource,
+            mime: embeddedArt != null ? (meta.artworkMime ?? 'image/jpeg') : (artworkMime ?? 'image/jpeg'),
             category: 'albums',
           )).id;
         } catch (_) {}
       }
-      final artistName = meta.artist ?? 'Unknown Artist';
+      final metaArtist = (meta.artist != null && meta.artist!.trim().isNotEmpty)
+          ? meta.artist
+          : null;
+      final artistName = metaArtist ??
+          ((artistOverride != null && artistOverride!.trim().isNotEmpty)
+              ? artistOverride
+              : 'Unknown Artist');
+      final metaTitle = (meta.title != null && meta.title!.trim().isNotEmpty) ? meta.title : null;
       final artist = await artists.upsertByName(artistName);
       String? albumId;
       if (meta.album != null) {
@@ -231,7 +256,10 @@ class ImportService {
       if (meta.genre != null) genreId = (await genres.upsertByName(meta.genre!)).id;
       final track = Track(
         id: _uuid.v4(),
-        title: meta.title ?? p.basenameWithoutExtension(path),
+        title: metaTitle ??
+            ((titleOverride != null && titleOverride!.trim().isNotEmpty)
+                ? titleOverride
+                : p.basenameWithoutExtension(path)),
         artist: artistName,
         artistId: artist.id,
         album: meta.album ?? 'Unknown Album',

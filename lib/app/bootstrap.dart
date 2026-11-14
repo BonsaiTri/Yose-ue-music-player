@@ -141,27 +141,43 @@ Future<String?> recoverDatabaseAt(String root) async {
   return 'Restored the library from the newest backup (${p.basename(backups.first.path)}). ' 'The corrupt file is kept at ${quarantine.path}.';
 }
 
+/// The platform default application-data root (no hardcoded absolute paths).
+Future<String> defaultAppRoot() async {
+  try {
+    return (await getApplicationSupportDirectory()).path;
+  } catch (_) {
+    return (await getApplicationDocumentsDirectory()).path;
+  }
+}
+
 /// Resolves the platform application-data root (no hardcoded absolute paths).
 ///
 /// If the user previously chose a custom data location (spec §6.10/§6.8),
-/// the choice is persisted in the default-root database and honored here:
-/// the custom directory is used when it still exists.
-Future<String> resolveAppRoot() async {
-  String defaultRoot;
-  try {
-    defaultRoot = (await getApplicationSupportDirectory()).path;
-  } catch (_) {
-    defaultRoot = (await getApplicationDocumentsDirectory()).path;
-  }
+/// the choice is persisted in the default-root database and honored here.
+/// Safety net: a custom location only counts when it actually contains a
+/// database. A bare directory (e.g. a location changed without migrating,
+/// or an Android folder whose permission did not survive a restart) falls
+/// back to the default root instead of opening a silently-empty library.
+Future<String> resolveAppRoot() async => resolveAppRootAt(await defaultAppRoot());
+
+/// Testable variant of [resolveAppRoot] with an explicit default root.
+Future<String> resolveAppRootAt(String defaultRoot) async {
   try {
     final probe = AppDatabase.withFile(File(p.join(
         defaultRoot, AppConstants.dirDatabase, AppConstants.databaseFileName)));
     try {
       final stored = await SettingsRepository(probe).get('storage.root');
-      if (stored != null && stored.isNotEmpty &&
-          Directory(stored).existsSync() && stored != defaultRoot) {
-        AppLogger.info('Using custom data location: $stored', tag: 'bootstrap');
-        return stored;
+      if (stored != null && stored.isNotEmpty && stored != defaultRoot) {
+        final customDb = File(p.join(
+            stored, AppConstants.dirDatabase, AppConstants.databaseFileName));
+        if (customDb.existsSync()) {
+          AppLogger.info('Using custom data location: $stored', tag: 'bootstrap');
+          return stored;
+        }
+        AppLogger.warning(
+            'Custom data location "$stored" has no database; '
+            'falling back to the default root',
+            tag: 'bootstrap');
       }
     } finally {
       await probe.close();

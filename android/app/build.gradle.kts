@@ -40,6 +40,21 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                file("proguard-rules.pro")
+            )
+        }
+    }
+
+    packaging {
+        jniLibs {
+            // Extract .so files to the app's native library dir at install time.
+            // The bundled yt-dlp runtime reads libpython.zip.so as a regular
+            // file from applicationInfo.nativeLibraryDir, which requires
+            // extraction (targetSdk 35+ defaults to no-extraction).
+            useLegacyPackaging = true
         }
     }
 }

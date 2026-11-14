@@ -23,12 +23,15 @@ class YtDlpException implements Exception {
 
 /// One entry of a flat listing (single video or playlist).
 class YtDlpEntry {
-  const YtDlpEntry({required this.id, required this.title, this.channel});
+  const YtDlpEntry({required this.id, required this.title, this.channel, this.thumbnail});
 
   /// YouTube video id.
   final String id;
   final String title;
   final String? channel;
+
+  /// Thumbnail URL reported by yt-dlp (usually an i.ytimg.com URL).
+  final String? thumbnail;
 
   String get watchUrl => 'https://www.youtube.com/watch?v=$id';
 }
@@ -119,6 +122,7 @@ List<YtDlpEntry> parseYtDlpListing(String stdout) {
             id: e['id'] as String,
             title: (e['title'] as String?) ?? e['id'] as String,
             channel: e['uploader'] as String?,
+            thumbnail: e['thumbnail'] as String?,
           ))
       .toList();
 }

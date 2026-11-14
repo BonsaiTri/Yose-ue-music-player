@@ -1,6 +1,9 @@
 package com.musicplayer.music_player
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.embedding.engine.plugins.FlutterPlugin
@@ -8,6 +11,8 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
+import java.io.File
+import java.io.FileOutputStream
 
 /**
  * Bridges the bundled yt-dlp runtime (youtubedl-android library, which ships
@@ -27,6 +32,11 @@ class YoutubeDlPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private var channel: MethodChannel? = null
     private var context: Context? = null
     private var progressSink: EventChannel.EventSink? = null
+
+    // EventSink.success() dispatches a platform message, which Flutter only
+    // allows on the main thread. The library's progress callback arrives on
+    // its worker thread, so every event is posted to the main looper.
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     companion object {
         const val TAG = "yose_ue/youtube_dl"
@@ -59,11 +69,26 @@ class YoutubeDlPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "init" -> Thread {
+                val appCtx = context!!
+                val base = File(appCtx.noBackupFilesDir, "youtubedl-android")
+                val failedMarker = File(appCtx.noBackupFilesDir, "youtubedl-android.init-failed")
                 try {
-                    YoutubeDL.init(context!!)
+                    // Self-heal: a previous init may have died mid-extraction,
+                    // leaving partial state that makes re-extraction fail (the
+                    // library's own cleanup is not recursive). Wipe it so a
+                    // retry always starts from a clean slate.
+                    if (failedMarker.exists()) {
+                        deleteRecursively(base)
+                        failedMarker.delete()
+                    }
+                    installPinnedYtDlp(appCtx, base)
+                    YoutubeDL.init(appCtx)
+                    failedMarker.delete()
                     result.success(true)
-                } catch (e: Exception) {
-                    result.error("init_failed", e.message ?: "yt-dlp init failed", null)
+                } catch (t: Throwable) {
+                    Log.e(TAG, "yt-dlp init failed", t)
+                    try { failedMarker.writeText(describe(t)) } catch (_: Exception) {}
+                    result.error("init_failed", describe(t), null)
                 }
             }.start()
 
@@ -81,8 +106,9 @@ class YoutubeDlPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                             .addOption("--ignore-errors")
                         val response = YoutubeDL.execute(request, null, null)
                         result.success(response.out)
-                    } catch (e: Exception) {
-                        result.error("ytdlp_failed", e.message ?: "yt-dlp listing failed", null)
+                    } catch (t: Throwable) {
+                        Log.e(TAG, "yt-dlp list failed", t)
+                        result.error("ytdlp_failed", describe(t), null)
                     }
                 }.start()
             }
@@ -106,14 +132,15 @@ class YoutubeDlPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                             .addOption("--restrict-filenames")
                             .addOption("-o", "$workDir/%(id)s.%(ext)s")
                         val response = YoutubeDL.execute(request, processKey) { progress, eta, line ->
-                            progressSink?.success(
-                                mapOf(
-                                    "key" to processKey,
-                                    "progress" to progress,
-                                    "eta" to eta,
-                                    "line" to (line ?: "")
-                                )
+                            val event = mapOf(
+                                "key" to processKey,
+                                "progress" to progress,
+                                "eta" to eta,
+                                "line" to (line ?: "")
                             )
+                            mainHandler.post {
+                                progressSink?.success(event)
+                            }
                         }
                         result.success(
                             mapOf(
@@ -124,8 +151,9 @@ class YoutubeDlPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                         )
                     } catch (e: YoutubeDL.CanceledException) {
                         result.error("cancelled", "download cancelled", null)
-                    } catch (e: Exception) {
-                        result.error("ytdlp_failed", e.message ?: "yt-dlp download failed", null)
+                    } catch (t: Throwable) {
+                        Log.e(TAG, "yt-dlp download failed", t)
+                        result.error("ytdlp_failed", describe(t), null)
                     }
                 }.start()
             }
@@ -139,5 +167,59 @@ class YoutubeDlPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
             else -> result.notImplemented()
         }
+    }
+
+    /**
+     * Flattens an exception chain (including causes) into a single
+     * readable message. The library wraps low-level IO failures in
+     * YoutubeDLException("failed to initialize", cause), and the cause
+     * is what actually tells us what went wrong.
+     */
+    private fun deleteRecursively(f: File) {
+        if (!f.exists()) return
+        if (f.isDirectory) f.listFiles()?.forEach { deleteRecursively(it) }
+        f.delete()
+    }
+
+    /**
+     * Installs our pinned yt-dlp script (assets/yt-dlp/yt-dlp, v2026.10.26 —
+     * the same version pinned on desktop) into the location the library
+     * expects (youtubedl-android/yt-dlp/yt-dlp) BEFORE YoutubeDL.init runs,
+     * because the library only copies its bundled script when the file is
+     * absent. The bundled script lags the upstream release and mishandles
+     * YouTube's current SABR/PO-token responses (HTTP 403), so we pin.
+     * A marker file pins the version so upgrades are idempotent.
+     */
+    private fun installPinnedYtDlp(appCtx: Context, base: File) {
+        val pinned = "2026.10.26"
+        val script = File(File(base, "yt-dlp"), "yt-dlp")
+        val marker = File(base, ".yt-dlp-version")
+        if (script.exists() && marker.exists() && marker.readText().trim() == pinned) return
+        try {
+            if (script.exists()) script.delete()
+            script.parentFile?.mkdirs()
+            appCtx.assets.open("flutter_assets/assets/yt-dlp/yt-dlp").use { input ->
+                FileOutputStream(script).use { input.copyTo(it) }
+            }
+            marker.writeText(pinned)
+            Log.i(TAG, "installed pinned yt-dlp $pinned at ${script.absolutePath}")
+        } catch (e: Exception) {
+            // Non-fatal: the library's own bundled script remains usable.
+            Log.w(TAG, "could not install pinned yt-dlp; using bundled script", e)
+        }
+    }
+
+    private fun describe(e: Throwable): String {
+        val sb = StringBuilder()
+        var cur: Throwable? = e
+        var depth = 0
+        while (cur != null && depth < 6) {
+            if (depth > 0) sb.append("\n  caused by: ")
+            sb.append(cur.javaClass.simpleName)
+            if (!cur.message.isNullOrBlank()) sb.append(": ").append(cur.message)
+            cur = cur.cause
+            depth++
+        }
+        return sb.toString().take(900)
     }
 }

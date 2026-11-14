@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:path/path.dart' as p;
 
@@ -15,6 +16,14 @@ import 'package:music_player/features/downloader/domain/youtube_resolver.dart';
 /// Internal signals for cooperative stop.
 class _Cancelled implements Exception {
   const _Cancelled();
+}
+
+/// Best-effort display metadata for a downloaded YouTube file.
+class YtMeta {
+  const YtMeta({this.title, this.artist, this.artwork});
+  final String? title;
+  final String? artist;
+  final List<int>? artwork;
 }
 
 class _Paused implements Exception {
@@ -340,6 +349,7 @@ class DownloadEngine {
 
   Future<void> _runTask(String id) async {
     String? tempPath;
+    YtMeta? ytMeta;
     try {
       // Re-check state: the task may have been cancelled/retried between
       // polling and execution, or another run may own it.
@@ -392,6 +402,9 @@ class DownloadEngine {
         target = _finalPath(task, extensionOverride: forcedExtension);
         await files.atomicMove(downloadedPath, target.path);
         tempPath = null; // owned by the library from here on
+        // Enrich: yt-dlp audio files carry no embedded metadata or cover.
+        // One flat listing gives us the title, channel and thumbnail URL.
+        ytMeta = await _fetchYtMeta(backend, task.url);
       } else {
         // PREPARING: allocate the temp file, probe expected size.
         String effectiveUrl = task.url;
@@ -422,8 +435,14 @@ class DownloadEngine {
             'Downloaded file is not a recognized audio format');
       }
 
-      final track =
-          await importer.registerDownloadedFile(target.path, sourceType: 'download');
+      final track = await importer.registerDownloadedFile(
+        target.path,
+        sourceType: 'download',
+        titleOverride: ytMeta?.title,
+        artistOverride: ytMeta?.artist,
+        artworkBytes: ytMeta?.artwork,
+        artworkMime: 'image/jpeg',
+      );
       if (track == null) {
         throw DownloadTaskException('Downloaded file is not a recognized audio format');
       }
@@ -458,6 +477,49 @@ class DownloadEngine {
       _cancelled.remove(id);
       _paused.remove(id);
       _ytProgressClock.remove(id);
+    }
+  }
+
+  /// Title/artist/cover for a YouTube source, fetched best-effort so a
+  /// metadata hiccup never fails an otherwise-complete download.
+  Future<YtMeta> _fetchYtMeta(YtDlpBackend backend, String url) async {
+    try {
+      final entries = await backend.list(url);
+      if (entries.isEmpty) return const YtMeta();
+      final first = entries.first;
+      final thumbUrl = (first.thumbnail != null && first.thumbnail!.isNotEmpty)
+          ? first.thumbnail!
+          : 'https://i.ytimg.com/vi/${first.id}/hqdefault.jpg';
+      final artwork = await _fetchImage(thumbUrl);
+      return YtMeta(
+          title: first.title,
+          artist: first.channel,
+          artwork: artwork);
+    } catch (e) {
+      AppLogger.warning('YouTube metadata fetch failed: $e', tag: 'download');
+      return const YtMeta();
+    }
+  }
+
+  /// GETs [url] into memory (8 MB cap). Returns null on any failure; the
+  /// caller validates the image bytes when storing.
+  Future<List<int>?> _fetchImage(String url) async {
+    final client = HttpClient();
+    try {
+      final req = await client.getUrl(Uri.parse(url));
+      final res = await req.close();
+      if (res.statusCode != 200) return null;
+      final builder = BytesBuilder(copy: false);
+      await for (final chunk in res) {
+        builder.add(chunk);
+        if (builder.length > 8 * 1024 * 1024) return null;
+      }
+      final bytes = builder.toBytes();
+      return bytes.isEmpty ? null : bytes;
+    } catch (_) {
+      return null;
+    } finally {
+      client.close(force: true);
     }
   }
 

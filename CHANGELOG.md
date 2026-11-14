@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.5 (2026-11-14)
+
+### Fixed
+- **Data location no longer orphans the library.** Previously, changing the
+  data location switched the app to a new empty root and the library
+  appeared to vanish (the data was still in the old root, unreferenced).
+  Changing the location now **migrates everything**: a consistent SQLite
+  snapshot of the database (VACUUM INTO) plus all music, artwork, downloads
+  and backups are copied to the new location, verified by total size, and
+  the choice is persisted. The source is never touched; any failure rolls
+  back the destination and the app keeps working on the original root.
+- **Bootstrap safety net**: a custom data location is only honored when it
+  actually contains a database file. A bare directory (changed without
+  migrating, or an Android folder whose permission did not survive a
+  restart) falls back to the default root instead of opening a
+  silently-empty library.
+- **Settings** now shows whether the active location is default or custom
+  and adds a one-tap **Use default location** reset (restores the original
+  library; content added while a custom location was active stays in that
+  folder).
+
 ## 0.3.4
 
 ### Changed

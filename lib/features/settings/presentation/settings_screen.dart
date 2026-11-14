@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,6 +8,9 @@ import 'package:path/path.dart' as p;
 import 'package:music_player/app/app.dart';
 import 'package:music_player/app/bootstrap.dart';
 import 'package:music_player/core/constants/app_constants.dart';
+import 'package:music_player/core/services/data_mover.dart';
+import 'package:music_player/database/database.dart';
+import 'package:music_player/database/repositories/playlist_settings_history_repository.dart';
 import 'package:music_player/features/diagnostics/presentation/diagnostics_screen.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -20,6 +25,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   int _maxConcurrent = 3;
   String? _lastBackup;
   bool _busy = false;
+  String? _defaultRoot;
 
   @override
   void initState() {
@@ -37,10 +43,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final last = await settings.get('backup.lastPath');
     final maxConcurrent =
         int.tryParse(await settings.get('downloads.maxConcurrent') ?? '') ?? 3;
+    final defRoot = await defaultAppRoot();
     if (mounted) {
       setState(() {
         _lastBackup = last;
         _maxConcurrent = [1, 2, 3, 5].contains(maxConcurrent) ? maxConcurrent : 3;
+        _defaultRoot = defRoot;
       });
       ref.read(themeModeProvider.notifier).state = _themeMode;
     }
@@ -56,14 +64,91 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _pickDataLocation() async {
+    final deps = ref.read(appDepsProvider);
     final path = await FilePicker.platform.getDirectoryPath();
-    if (path == null || !mounted) return;
-    await ref.read(appDepsProvider).settings.set('storage.root', path);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Data location set to $path — relaunch the app to use it. '
-            'Use Backup & Restore to move your library into the new location.'),
-      ));
+    if (path == null || !mounted || path == deps.root) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Move library data?'),
+        content: Text(
+          'All music, artwork, downloads and backups will be copied to:\n\n$path\n\n'
+          'The source data is left untouched until the app restarts on the new '
+          'location. On Android, folders outside the app storage may need '
+          'their permission re-granted after a restart.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Move')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    // Blocking progress dialog; the migration never deletes the source.
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const AlertDialog(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('Moving data… this can take a while.'),
+          ],
+        ),
+      ),
+    );
+    String? error;
+    try {
+      await const DataMover().migrate(
+        db: deps.db,
+        from: deps.root,
+        to: path,
+        defaultRoot: (await defaultAppRoot()),
+      );
+    } catch (e) {
+      error = '$e';
+    } finally {
+      if (mounted) Navigator.of(context).pop(); // dismiss progress dialog
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(error == null
+          ? 'Library moved to $path — relaunch the app to use it.'
+          : 'Move failed (original data untouched): $error'),
+    ));
+  }
+
+  /// Restores the platform default data location by clearing the persisted
+  /// choice (the default-root database is what bootstrap probes).
+  Future<void> _resetDataLocation() async {
+    final def = _defaultRoot;
+    final deps = ref.read(appDepsProvider);
+    if (def == null || deps.root == def) return;
+    try {
+      final dbFile = File(p.join(def, AppConstants.dirDatabase, AppConstants.databaseFileName));
+      final probe = AppDatabase.withFile(dbFile);
+      try {
+        await SettingsRepository(probe).delete('storage.root');
+      } finally {
+        await probe.close();
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Default location restored — relaunch the app.')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not reset location: $e')));
+      }
     }
   }
 
@@ -189,10 +274,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           ListTile(
             title: const Text('Data location'),
-            subtitle: Text(deps.root, maxLines: 2, overflow: TextOverflow.ellipsis),
+            subtitle: Text(
+              deps.root == _defaultRoot
+                  ? '$deps.root  (default)'
+                  : '$deps.root  (custom)',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
             trailing: const Icon(Icons.folder_outlined),
             onTap: _pickDataLocation,
           ),
+          if (deps.root != _defaultRoot)
+            ListTile(
+              title: const Text('Use default location'),
+              subtitle: const Text(
+                  'Stop using the custom location and return to the app default'),
+              trailing: const Icon(Icons.home_work_outlined),
+              onTap: _resetDataLocation,
+            ),
           ListTile(
             title: const Text('Rescan library files'),
             subtitle: const Text('Re-verify file availability (external drives)'),
