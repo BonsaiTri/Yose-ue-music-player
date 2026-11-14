@@ -38,11 +38,26 @@ class _ArtworkLoaderState extends State<_ArtworkLoader> {
     _load();
   }
 
+  /// The mini player and list tiles reuse this widget state when the
+  /// underlying track changes — reload when the artwork reference does.
+  @override
+  void didUpdateWidget(covariant _ArtworkLoader oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.artworkId != widget.artworkId) {
+      _path = null;
+      _load();
+    }
+  }
+
   Future<void> _load() async {
-    if (widget.artworkId == null) return;
-    final path = await widget.artworkService.absolutePathFor(widget.artworkId);
-    if (!mounted) return;
-    if (path != null && File(path).existsSync()) setState(() => _path = path);
+    final id = widget.artworkId;
+    if (id == null) {
+      if (_path != null) setState(() => _path = null);
+      return;
+    }
+    final path = await widget.artworkService.absolutePathFor(id);
+    if (!mounted || widget.artworkId != id) return; // stale result
+    setState(() => _path = (path != null && File(path).existsSync()) ? path : null);
   }
 
   @override

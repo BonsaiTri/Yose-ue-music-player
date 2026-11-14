@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 
 import 'package:music_player/app/bootstrap.dart';
 import 'package:music_player/database/database.dart';
+import 'package:music_player/features/downloader/domain/yt_dlp.dart';
 import 'package:music_player/features/downloader/domain/youtube_resolver.dart';
 
 /// Persistent download queue and history.
@@ -32,7 +33,10 @@ class DownloadsScreen extends ConsumerStatefulWidget {
 
 class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
   final TextEditingController _urlController = TextEditingController();
+  final TextEditingController _searchController = TextEditingController();
   bool _adding = false;
+  bool _searching = false;
+  List<YtDlpEntry> _searchResults = const [];
   List<DownloadTask> _active = const [];
   List<DownloadTask> _queued = const [];
   List<DownloadTask> _paused = const [];
@@ -58,7 +62,43 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
   void dispose() {
     _activeSub?.cancel();
     _urlController.dispose();
+    _searchController.dispose();
     super.dispose();
+  }
+
+  /// Searches YouTube (via yt-dlp's `ytsearch` extractor) and shows the
+  /// results; tapping one queues it for download.
+  Future<void> _searchYouTube() async {
+    final q = _searchController.text.trim();
+    if (q.isEmpty || _searching) return;
+    setState(() {
+      _searching = true;
+      _searchResults = const [];
+    });
+    try {
+      final results =
+          await ref.read(appDepsProvider).downloader.searchYouTube(q);
+      if (!mounted) return;
+      setState(() => _searchResults = results);
+      if (results.isEmpty) _showSnack('No YouTube results found.');
+    } catch (e) {
+      _showSnack('YouTube search failed: $e');
+    } finally {
+      if (mounted) setState(() => _searching = false);
+    }
+  }
+
+  Future<void> _queueSearchResult(YtDlpEntry entry) async {
+    try {
+      final summary =
+          await ref.read(appDepsProvider).downloader.queueYouTube(entry.watchUrl);
+      _showSnack(summary.queued == 1
+          ? '“${entry.title}” queued for download'
+          : 'Queued ${summary.queued} tracks');
+      await _load();
+    } catch (e) {
+      _showSnack('Could not queue: $e');
+    }
   }
 
   /// Adds a direct media URL to the download queue.
@@ -162,6 +202,7 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
         children: [
           _addForm(),
           _addFormHint(),
+          _searchSection(),
           Expanded(
             child: _active.isEmpty &&
                     _queued.isEmpty &&
@@ -244,6 +285,71 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
             label: const Text('Queue'),
             onPressed: _adding ? null : _add,
           ),
+        ],
+      ),
+    );
+  }
+
+  /// YouTube search: type a query, tap a result to queue it.
+  Widget _searchSection() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _searchController,
+                  decoration: const InputDecoration(
+                    labelText: 'Search YouTube',
+                    hintText: 'Artist, song, or channel…',
+                    prefixIcon: Icon(Icons.search),
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  onSubmitted: (_) => _searchYouTube(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.tonalIcon(
+                icon: _searching
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.search),
+                label: const Text('Search'),
+                onPressed: _searching ? null : _searchYouTube,
+              ),
+            ],
+          ),
+          if (_searchResults.isNotEmpty)
+            for (final e in _searchResults)
+              ListTile(
+                leading: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: _SearchThumb(url: e.thumbnail),
+                ),
+                title: Text(e.title,
+                    maxLines: 1, overflow: TextOverflow.ellipsis),
+                subtitle: Text(e.channel ?? 'YouTube',
+                    style: const TextStyle(fontSize: 11)),
+                onTap: () => _queueSearchResult(e),
+                trailing: IconButton(
+                  icon: const Icon(Icons.download),
+                  tooltip: 'Queue for download',
+                  onPressed: () => _queueSearchResult(e),
+                ),
+              ),
+          if (_searchResults.isNotEmpty)
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
+              child: Text(
+                  'Tap a result (or the download icon) to queue it.',
+                  style: TextStyle(fontSize: 11)),
+            ),
         ],
       ),
     );
@@ -333,5 +439,29 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
       return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
     }
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
+  }
+}
+
+/// Remote thumbnail for search results, with a safe placeholder.
+class _SearchThumb extends StatelessWidget {
+  const _SearchThumb({required this.url});
+  final String? url;
+
+  @override
+  Widget build(BuildContext context) {
+    if (url == null || url!.isEmpty) {
+      return const SizedBox(
+          width: 44,
+          height: 44,
+          child: Icon(Icons.music_note, size: 24));
+    }
+    return Image.network(
+      url!,
+      width: 44,
+      height: 44,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) =>
+          const Icon(Icons.music_note, size: 24),
+    );
   }
 }

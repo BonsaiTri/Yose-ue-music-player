@@ -446,8 +446,78 @@ http://127.0.0.1:$port/c.wav
       expect(fake.calls.any((c) => c.startsWith('download')), isTrue);
       final count = await TrackRepository(db).trackCount();
       expect(count, greaterThan(0));
+      // The fake reports no listing entries, so the track must be enriched
+      // from the task's own title/artist (queue-time data), not a second
+      // yt-dlp listing — and definitely not the bare file name.
+      final track = (await TrackRepository(db).recentlyAdded()).first;
+      expect(track.title, 'All Eyes On Me (Song Only)');
+      expect(track.artist, 'Bo Burnham - Topic');
     } finally {
       await engine.stop();
+    }
+  });
+
+  test('searchYouTube returns yt-dlp search results', () async {
+    final fake = _FakeYtDlp(entries: const [
+      YtDlpEntry(
+          id: '1Rx_p3NW7gQ',
+          title: 'All Eyes On Me -- Bo Burnham',
+          channel: 'boburnham',
+          thumbnail: 'https://i.ytimg.com/vi/1Rx_p3NW7gQ/hqdefault.jpg'),
+      YtDlpEntry(id: 'fBgKxsvl6M8', title: 'All Eyes On Me (Song Only)', channel: 'boburnham'),
+    ]);
+    final engine = DownloadEngine(
+        downloads: downloads, files: files, importer: importer, ytDlp: fake);
+    try {
+      final found = await engine.searchYouTube('bo burnham all eyes on me');
+      expect(found, hasLength(2));
+      expect(found.first.id, '1Rx_p3NW7gQ');
+      expect(found.first.title, 'All Eyes On Me -- Bo Burnham');
+      expect(
+          fake.calls
+              .any((c) => c.contains('ytsearch8:bo burnham all eyes on me')),
+          isTrue);
+    } finally {
+      await engine.stop();
+    }
+  });
+
+  test('searchYouTube respects maxResults and caps it at 20', () async {
+    final fake = _FakeYtDlp(entries: const [
+      YtDlpEntry(id: 'aaaaaaaaaaa', title: 'A'),
+    ]);
+    final engine = DownloadEngine(
+        downloads: downloads, files: files, importer: importer, ytDlp: fake);
+    try {
+      await engine.searchYouTube('test query', maxResults: 3);
+      expect(fake.calls.any((c) => c.contains('ytsearch3:test query')), isTrue);
+      await engine.searchYouTube('test query', maxResults: 500);
+      expect(fake.calls.any((c) => c.contains('ytsearch20:test query')), isTrue);
+    } finally {
+      await engine.stop();
+    }
+  });
+
+  test('searchYouTube rejects empty queries and surfaces backend errors',
+      () async {
+    final engine = DownloadEngine(
+        downloads: downloads, files: files, importer: importer, ytDlp: _FakeYtDlp());
+    try {
+      await expectLater(engine.searchYouTube('   '),
+          throwsA(isA<DownloadTaskException>()));
+    } finally {
+      await engine.stop();
+    }
+    final failing = DownloadEngine(
+        downloads: downloads,
+        files: files,
+        importer: importer,
+        ytDlp: _FakeYtDlp(errorMessage: 'YouTube search failed.'));
+    try {
+      await expectLater(failing.searchYouTube('query'),
+          throwsA(isA<DownloadTaskException>()));
+    } finally {
+      await failing.stop();
     }
   });
 

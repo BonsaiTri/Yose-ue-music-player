@@ -30,6 +30,20 @@
   playlist API (instead of a single playlist object). Such playlists
   previously failed with a cryptic parse error; every track is now
   queued (with channel and thumbnail metadata).
+- **YouTube search**: the Downloads screen now has a search box. Type a
+  query (artist, song, channel), browse the top results with
+  thumbnails, and tap one to queue it for download — powered by
+  yt-dlp's built-in `ytsearch` extractor, no separate API needed.
+- **Fixed missing album art / "Unknown Artist" on long playlists**: the
+  engine previously ran a second yt-dlp listing per downloaded track to
+  fetch metadata; on long queues that got rate-limited, leaving tracks
+  without artist or cover. Title/artist now come from the queue-time
+  listing (already stored on the task) and the cover is fetched
+  directly from `i.ytimg.com` — no extra yt-dlp process per track.
+- **Mini player artwork now updates with the track**: the artwork widget
+  only loaded in `initState`, so it stayed on the first track's cover
+  while you skipped around. It now reloads whenever the playing track
+  (or its artwork) changes, with a stale-response guard.
 
 ## 0.3.4
 

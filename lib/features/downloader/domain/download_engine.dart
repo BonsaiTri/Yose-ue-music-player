@@ -234,6 +234,32 @@ class DownloadEngine {
     }
   }
 
+  /// Searches YouTube and returns up to [maxResults] matches (title,
+  /// channel, thumbnail). Uses yt-dlp's built-in `ytsearchN:query` search
+  /// extractor, so no separate search API is needed. Tap a result in the
+  /// UI to queue it via [queueYouTube].
+  Future<List<YtDlpEntry>> searchYouTube(
+    String query, {
+    int maxResults = 8,
+  }) async {
+    final backend = ytDlp;
+    if (backend == null) {
+      throw const DownloadTaskException(
+          'YouTube downloading is not available on this platform');
+    }
+    final q = query.trim();
+    if (q.isEmpty) throw const DownloadTaskException('Enter a search query');
+    if (q.length > 200) throw const DownloadTaskException('Search query too long');
+    final cap = maxResults.clamp(1, 20);
+    final url = 'ytsearch$cap:$q';
+    try {
+      final entries = await backend.list(url);
+      return entries.take(cap).toList();
+    } on YtDlpException catch (e) {
+      throw DownloadTaskException(e.message);
+    }
+  }
+
   /// Fetches a playlist body (bounded to 2 MB).
   Future<String> _fetchPlaylist(Uri uri) async {
     final client = _client ?? HttpClient()..connectionTimeout = _connectTimeout;
@@ -417,8 +443,11 @@ class DownloadEngine {
         await files.atomicMove(downloadedPath, target.path);
         tempPath = null; // owned by the library from here on
         // Enrich: yt-dlp audio files carry no embedded metadata or cover.
-        // One flat listing gives us the title, channel and thumbnail URL.
-        ytMeta = await _fetchYtMeta(backend, task.url);
+        // Title/artist are already known from queue time (the flat
+        // listing populated the task); the cover is fetched straight from
+        // i.ytimg.com. No second yt-dlp run per track — that was slow and
+        // got rate-limited on long playlists.
+        ytMeta = await _ytEnrichment(backend, task);
       } else {
         // PREPARING: allocate the temp file, probe expected size.
         String effectiveUrl = task.url;
@@ -492,6 +521,35 @@ class DownloadEngine {
       _paused.remove(id);
       _ytProgressClock.remove(id);
     }
+  }
+
+  /// Title/artist/cover for a completed YouTube task.
+  ///
+  /// Title and artist come from the task itself (populated by the flat
+  /// listing at queue time). The cover is fetched directly from
+  /// i.ytimg.com using the video id — no extra yt-dlp process. Only when
+  /// something is missing do we fall back to a full flat listing.
+  Future<YtMeta> _ytEnrichment(
+      YtDlpBackend backend, DownloadTask task) async {
+    String? title =
+        task.title.trim().isEmpty ? null : task.title.trim();
+    String? artist = (task.artist.trim().isEmpty ||
+            task.artist.trim() == 'Unknown Artist')
+        ? null
+        : task.artist.trim();
+    List<int>? artwork;
+    final videoId = YouTubeResolver.videoIdFromUrl(task.url);
+    if (videoId != null) {
+      artwork = await _fetchImage(
+          'https://i.ytimg.com/vi/$videoId/hqdefault.jpg');
+    }
+    if (title == null || artist == null || artwork == null) {
+      final meta = await _fetchYtMeta(backend, task.url);
+      title = title ?? meta.title;
+      artist = artist ?? meta.artist;
+      artwork = artwork ?? meta.artwork;
+    }
+    return YtMeta(title: title, artist: artist, artwork: artwork);
   }
 
   /// Title/artist/cover for a YouTube source, fetched best-effort so a
