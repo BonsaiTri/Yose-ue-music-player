@@ -236,7 +236,7 @@ class ImportService {
           ? meta.artist
           : null;
       final artistName = metaArtist ??
-          ((artistOverride != null && artistOverride!.trim().isNotEmpty)
+          ((artistOverride != null && artistOverride.trim().isNotEmpty)
               ? artistOverride
               : 'Unknown Artist');
       final metaTitle = (meta.title != null && meta.title!.trim().isNotEmpty) ? meta.title : null;
@@ -257,7 +257,7 @@ class ImportService {
       final track = Track(
         id: _uuid.v4(),
         title: metaTitle ??
-            ((titleOverride != null && titleOverride!.trim().isNotEmpty)
+            ((titleOverride != null && titleOverride.trim().isNotEmpty)
                 ? titleOverride
                 : p.basenameWithoutExtension(path)),
         artist: artistName,

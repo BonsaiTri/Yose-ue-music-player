@@ -66,7 +66,8 @@ class DataMover {
       _verifySize(from, to);
       await _persistChoice(to, defaultRoot);
       AppLogger.info(
-          'Migration complete (${grandDone} bytes moved, setting persisted)', tag: 'migrate');
+          'Migration complete (${grandDone} of $grandTotal bytes moved, '
+              'setting persisted)', tag: 'migrate');
     } catch (e) {
       AppLogger.error('Migration failed, rolling back destination: $e', tag: 'migrate');
       try {
