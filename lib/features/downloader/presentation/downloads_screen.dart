@@ -88,6 +88,39 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
     }
   }
 
+  /// Asks for confirmation, then deletes all finished download records.
+  /// Music and files in the library are not affected.
+  Future<void> _confirmClearHistory() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clear download history?'),
+        content: const Text(
+            'Removes all finished download records. Your music and the '
+            'downloaded files stay in the library.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Clear')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      final removed =
+          await ref.read(appDepsProvider).downloads.clearHistory();
+      await _load();
+      _showSnack(removed > 0
+          ? 'Cleared $removed history records'
+          : 'History is already empty');
+    } catch (e) {
+      _showSnack('Could not clear history: $e');
+    }
+  }
+
   Future<void> _queueSearchResult(YtDlpEntry entry) async {
     try {
       final summary =
@@ -242,10 +275,22 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
                     _taskTile(task, deps, cancellable: true),
                 ],
                       if (_history.isNotEmpty) ...[
-                        const Padding(
-                          padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
-                          child: Text('History',
-                              style: TextStyle(fontWeight: FontWeight.bold)),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 12, 4, 4),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text('History',
+                                    style:
+                                        const TextStyle(fontWeight: FontWeight.bold)),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.delete_sweep),
+                                tooltip: 'Clear history',
+                                onPressed: _confirmClearHistory,
+                              ),
+                            ],
+                          ),
                         ),
                         for (final task in _history) _taskTile(task, deps),
                       ],

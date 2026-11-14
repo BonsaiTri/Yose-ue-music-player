@@ -498,6 +498,26 @@ http://127.0.0.1:$port/c.wav
     }
   });
 
+  test('clearHistory removes only finished records, keeps queued tasks',
+      () async {
+    final kept = await downloads.create(
+        url: 'https://example.com/a.mp3', title: 'Kept (queued)');
+    final done = await downloads.create(
+        url: 'https://example.com/b.mp3', title: 'Done');
+    await downloads.updateStatus(done.id, DownloadTaskStatus.completed);
+    final cancelled = await downloads.create(
+        url: 'https://example.com/c.mp3', title: 'Cancelled');
+    await downloads.cancel(cancelled.id);
+
+    final removed = await downloads.clearHistory();
+    expect(removed, 2);
+    expect(await downloads.byId(done.id), isNull);
+    expect(await downloads.byId(cancelled.id), isNull);
+    expect((await downloads.byId(kept.id))?.status, DownloadTaskStatus.queued);
+    // Second clear is a no-op.
+    expect(await downloads.clearHistory(), 0);
+  });
+
   test('searchYouTube rejects empty queries and surfaces backend errors',
       () async {
     final engine = DownloadEngine(

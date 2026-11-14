@@ -44,6 +44,9 @@
   only loaded in `initState`, so it stayed on the first track's cover
   while you skipped around. It now reloads whenever the playing track
   (or its artwork) changes, with a stale-response guard.
+- **Clear download history**: the Downloads screen's History section has a
+  sweep icon that (after confirmation) removes all finished download
+  records. Music and downloaded files in the library are untouched.
 
 ## 0.3.4
 

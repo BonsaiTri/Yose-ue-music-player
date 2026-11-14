@@ -124,6 +124,19 @@ class DownloadRepository {
     return true;
   }
 
+  /// Deletes all terminal history records (completed, failed, cancelled).
+  /// Library tracks and their files are untouched — only the download
+  /// task rows go away. Returns the number of records removed.
+  Future<int> clearHistory() async {
+    final stmt = db.delete(db.downloadTasks)
+      ..where((t) => t.status.isInValues(const [
+        DownloadTaskStatus.completed,
+        DownloadTaskStatus.failed,
+        DownloadTaskStatus.cancelled,
+      ]));
+    return stmt.go();
+  }
+
   /// Re-queues a failed, cancelled or paused task.
   Future<void> retry(String id) async {
     final task = await byId(id);
