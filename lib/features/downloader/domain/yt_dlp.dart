@@ -102,7 +102,10 @@ YtDlpBackend createYtDlpBackend({required String appRoot}) {
 List<YtDlpEntry> parseYtDlpListing(String stdout) {
   final decoded = jsonDecode(stdout);
   List<Map<String, dynamic>> raw;
-  if (decoded is Map<String, dynamic>) {
+  if (decoded is List) {
+    // --flat-playlist emits a top-level array of entry objects.
+    raw = decoded.whereType<Map<String, dynamic>>().toList();
+  } else if (decoded is Map<String, dynamic>) {
     final entries = decoded['entries'];
     raw = entries is List
         ? entries.whereType<Map<String, dynamic>>().toList()
