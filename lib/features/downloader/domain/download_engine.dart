@@ -9,6 +9,7 @@ import 'package:music_player/core/services/file_service.dart';
 import 'package:music_player/database/database.dart';
 import 'package:music_player/database/repositories/download_repository.dart';
 import 'package:music_player/features/media_import/domain/import_service.dart';
+import 'package:music_player/features/downloader/domain/youtube_resolver.dart';
 
 /// Internal signals for cooperative stop.
 class _Cancelled implements Exception {
@@ -70,12 +71,14 @@ class DownloadEngine {
     required this.files,
     required this.importer,
     this.concurrency = AppConstants.maxConcurrentDownloads,
-  });
+    YouTubeResolver? youtube,
+  }) : _youtube = youtube ?? YouTubeResolver();
 
   final DownloadRepository downloads;
   final FileService files;
   final ImportService importer;
   final int concurrency;
+  final YouTubeResolver _youtube;
 
   static const _pollInterval = Duration(seconds: 2);
   static const _progressFlush = Duration(milliseconds: 500);
@@ -156,6 +159,53 @@ class DownloadEngine {
     }
     AppLogger.info('Queued $queued tracks from playlist $url', tag: 'download');
     return PlaylistQueueSummary(queued: queued, ignored: ignored);
+  }
+
+  /// Enqueues a YouTube video or playlist.
+  ///
+  /// * Single video: one task whose source is the watch URL; the audio
+  ///   stream is resolved at download time (YouTube stream URLs expire).
+  /// * Playlist: every track becomes a task with its watch URL; titles and
+  ///   artists come from the playlist metadata.
+  Future<PlaylistQueueSummary> queueYouTube(String url) async {
+    if (!YouTubeResolver.isYouTubeUrl(url)) {
+      throw const DownloadTaskException('Not a YouTube URL');
+    }
+    try {
+      final playlistId = YouTubeResolver.playlistIdFromUrl(url);
+      if (playlistId != null) {
+        final entries = await _youtube.resolvePlaylist(url, limit: _maxPlaylistEntries);
+        var queued = 0;
+        var ignored = 0;
+        for (final entry in entries) {
+          try {
+            await downloads.create(
+              url: entry.watchUrl,
+              title: entry.title,
+              artist: entry.artist,
+            );
+            queued++;
+          } catch (_) {
+            ignored++;
+          }
+        }
+        if (queued == 0) {
+          throw const DownloadTaskException('Could not queue any tracks from playlist');
+        }
+        AppLogger
+            .info('Queued $queued tracks from YouTube playlist $playlistId', tag: 'download');
+        return PlaylistQueueSummary(queued: queued, ignored: ignored);
+      }
+
+      // Single video: resolve metadata now, stream at download time.
+      final resolved = await _youtube.resolveVideo(url);
+      final ref = resolved.ref;
+      await downloads.create(url: ref.watchUrl, title: ref.title, artist: ref.artist);
+      AppLogger.info('Queued YouTube video ${ref.videoId} (${ref.title})', tag: 'download');
+      return const PlaylistQueueSummary(queued: 1, ignored: 0);
+    } on YouTubeException catch (e) {
+      throw DownloadTaskException(e.message);
+    }
   }
 
   /// Fetches a playlist body (bounded to 2 MB).
@@ -296,11 +346,22 @@ class DownloadEngine {
         throw DownloadTaskException('URL must be http or https');
       }
 
+      // YouTube sources: resolve a fresh direct audio stream now. The task's
+      // persisted URL stays the watch URL, so retries always re-resolve.
+      String effectiveUrl = task.url;
+      String? forcedExtension;
+      if (YouTubeResolver.isYouTubeUrl(task.url)) {
+        if (_cancelled.contains(id)) throw const _Cancelled();
+        final resolved = await _youtube.resolveVideo(task.url);
+        effectiveUrl = resolved.stream.url;
+        forcedExtension = resolved.stream.extension;
+      }
+
       // PREPARING: allocate the temp file, probe expected size.
       tempPath = p.join(files.tempDir, 'dl_${id}.part');
       await downloads.updateStatus(id, DownloadTaskStatus.preparing, tempPath: tempPath);
       if (_cancelled.contains(id)) throw const _Cancelled();
-      final expected = await _probeLength(task.url);
+      final expected = await _probeLength(effectiveUrl);
       if (expected != null) {
         await downloads.updateStatus(id, DownloadTaskStatus.preparing, bytesExpected: expected);
       }
@@ -308,14 +369,20 @@ class DownloadEngine {
       // DOWNLOADING: stream to the temp file with throttled progress.
       if (_cancelled.contains(id)) throw const _Cancelled();
       await downloads.updateStatus(id, DownloadTaskStatus.downloading);
-      final done = await _downloadToFile(id, task.url, tempPath, expected);
+      final done = await _downloadToFile(id, effectiveUrl, tempPath, expected);
 
       // PROCESSING: atomic move into the downloads dir, register in library.
       await downloads.updateStatus(id, DownloadTaskStatus.processing,
           progress: 1.0, bytesDone: done, speedBps: 0);
-      final target = _finalPath(task);
+      final target = _finalPath(task, extensionOverride: forcedExtension);
       await files.atomicMove(tempPath, target.path);
       tempPath = null; // owned by the library from here on
+
+      // Reject pages/garque that merely *look* like files (wrong content).
+      if (!await _looksLikeAudioFile(target.path)) {
+        throw const DownloadTaskException(
+            'Downloaded file is not a recognized audio format');
+      }
 
       final track =
           await importer.registerDownloadedFile(target.path, sourceType: 'download');
@@ -367,7 +434,11 @@ class DownloadEngine {
     } else if (e is _Paused) {
       await downloads.updateStatus(id, DownloadTaskStatus.paused);
     } else {
-      final message = e is DownloadTaskException ? e.message : '$e';
+      final message = e is DownloadTaskException
+          ? e.message
+          : e is YouTubeException
+              ? e.message
+              : '$e';
       AppLogger.error('Download $id failed: $message', tag: 'download');
       await downloads.updateStatus(id, DownloadTaskStatus.failed, error: message);
     }
@@ -447,10 +518,52 @@ class DownloadEngine {
     }
   }
 
+  /// Cheap content sniff: does the file start with an audio magic number
+  /// (ID3/MPEG frame, ftyp, fLaC, OggS, RIFF/WAVE)?
+  Future<bool> _looksLikeAudioFile(String path) async {
+    final f = File(path);
+    if (!f.existsSync() || await f.length() < 12) return false;
+    final raf = await f.open(mode: FileMode.read);
+    try {
+      final head = raf.readSync(12);
+      bool matches(int offset, List<int> sig) {
+        if (head.length < offset + sig.length) return false;
+        for (var i = 0; i < sig.length; i++) {
+          if (head[offset + i] != sig[i]) return false;
+        }
+        return true;
+      }
+      // MP3: ID3 tag or a bare MPEG frame sync.
+      if (matches(0, [0x49, 0x44, 0x33]) ||
+          (head.length >= 2 &&
+              head[0] == 0xFF &&
+              (head[1] & 0xE0) == 0xE0)) {
+        return true;
+      }
+      // MP4/M4A: 'ftyp' at offset 4.
+      if (matches(4, [0x66, 0x74, 0x79, 0x70])) return true;
+      // FLAC: 'fLaC'. OGG: 'OggS'. WAV: 'RIFF....WAVE'.
+      if (matches(0, [0x66, 0x4C, 0x61, 0x43])) return true;
+      if (matches(0, [0x4F, 0x67, 0x67, 0x53])) return true;
+      if (matches(0, [0x52, 0x49, 0x46, 0x46]) && matches(8, [0x57, 0x41, 0x56, 0x45])) {
+        return true;
+      }
+      return false;
+    } catch (_) {
+      return false;
+    } finally {
+      raf.closeSync();
+    }
+  }
+
   /// Destination file for a finished download (collision-safe).
-  File _finalPath(DownloadTask task) {
+  File _finalPath(DownloadTask task, {String? extensionOverride}) {
     final base = _safeName(task.title);
-    final ext = _extensionFor(task.url);
+    final ext = extensionOverride != null &&
+            AppConstants.audioExtensions.contains(extensionOverride) &&
+            extensionOverride.isNotEmpty
+        ? '.$extensionOverride'
+        : _extensionFor(task.url);
     var candidate = p.join(files.downloadsDir, '$base$ext');
     var n = 1;
     while (File(candidate).existsSync()) {
@@ -467,6 +580,8 @@ class DownloadEngine {
   }
 
   String _extensionFor(String url) {
+    // YouTube watch URLs have no extension; callers pass an override.
+    if (YouTubeResolver.isYouTubeUrl(url)) return '.m4a';
     final ext = p.extension(Uri.parse(url).path).toLowerCase();
     if (ext.isEmpty || !AppConstants.audioExtensions.contains(ext.substring(1))) {
       return '.mp3';

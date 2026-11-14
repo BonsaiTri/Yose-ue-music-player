@@ -23,8 +23,10 @@ library, metadata, and playback live on local disk.
 - **Downloads**: pluggable source protocol with a queue executor
   (`features/downloader/domain/download_engine.dart`) — resumable queue,
   concurrent transfers, pause/cancel, on-disk validation of imported audio,
-  and **M3U/M3U8 playlist download** (paste a playlist URL and every track
-  is queued automatically).
+  **M3U/M3U8 playlist download** (paste a playlist URL and every track is
+  queued automatically) and **YouTube video/playlist download** (resolves the
+  best directly-downloadable audio stream, re-resolved fresh at download
+  time; see `features/downloader/domain/youtube_resolver.dart`).
 - **Resilience**: verified auto-backups (retention 5) at boot, a recovery
   screen that quarantines a corrupt database and restores the newest backup.
 

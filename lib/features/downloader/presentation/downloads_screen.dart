@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 
 import 'package:music_player/app/bootstrap.dart';
 import 'package:music_player/database/database.dart';
+import 'package:music_player/features/downloader/domain/youtube_resolver.dart';
 
 /// Persistent download queue and history.
 ///
@@ -67,7 +68,15 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
     try {
       final engine = ref.read(appDepsProvider).downloader;
       final path = uri.path.toLowerCase();
-      if (path.endsWith('.m3u') || path.endsWith('.m3u8')) {
+      if (YouTubeResolver.isYouTubeUrl(uri.toString())) {
+        final summary = await engine.queueYouTube(uri.toString());
+        _showSnack(summary.queued == 1
+            ? 'YouTube track queued'
+            : summary.ignored > 0
+                ? 'Queued ${summary.queued} tracks from YouTube playlist '
+                    '(${summary.ignored} skipped)'
+                : 'Queued ${summary.queued} tracks from YouTube playlist');
+      } else if (path.endsWith('.m3u') || path.endsWith('.m3u8')) {
         final summary = await engine.queuePlaylist(uri.toString());
         _showSnack(summary.ignored > 0
             ? 'Queued ${summary.queued} tracks from playlist '
@@ -193,7 +202,7 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
               controller: _urlController,
               keyboardType: TextInputType.url,
               decoration: const InputDecoration(
-                labelText: 'Track URL or playlist (.m3u8)',
+                labelText: 'Track URL, playlist (.m3u8), or YouTube link',
                 prefixIcon: Icon(Icons.link),
                 border: OutlineInputBorder(),
                 isDense: true,
@@ -223,7 +232,8 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
       child: Align(
         alignment: Alignment.centerLeft,
         child: Text(
-            'Paste a direct track URL, or an M3U/M3U8 playlist URL to queue every track in it.'),
+            'Paste a track URL, an M3U/M3U8 playlist, or a YouTube video/playlist link. ')
+            // YouTube links queue as watch URLs and are resolved at download time.
       ),
     );
   }

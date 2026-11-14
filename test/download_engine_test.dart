@@ -20,6 +20,7 @@ import 'package:music_player/database/database.dart';
 import 'package:music_player/database/repositories/download_repository.dart';
 import 'package:music_player/database/repositories/library_repository.dart';
 import 'package:music_player/features/downloader/domain/download_engine.dart';
+import 'package:music_player/features/downloader/domain/youtube_resolver.dart';
 import 'package:music_player/features/media_import/domain/import_service.dart';
 
 /// 1 s of silence as a valid WAV (16-bit PCM mono).
@@ -88,12 +89,23 @@ void main() {
 
   List<int>? serveBytes; // per-test body
   Map<String, List<int>>? routeBytes; // per-path bodies (playlist tests)
+  Map<String, Map<String, dynamic>>? routeJson; // per-path JSON (YouTube tests)
 
   setUpAll(() async {
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     port = server.port;
     serveBytes = null;
     server.listen((req) async {
+      final jsonBody = routeJson?[req.uri.path];
+      if (jsonBody != null) {
+        // Drain any POST body (Innertube calls are POSTs).
+        await req.drain();
+        req.response.statusCode = 200;
+        req.response.headers.contentType = ContentType.json;
+        req.response.write(jsonEncode(jsonBody));
+        await req.response.close();
+        return;
+      }
       final body = routeBytes?[req.uri.path] ?? serveBytes;
       if (body == null) {
         req.response.statusCode = 404;
@@ -124,6 +136,7 @@ void main() {
 
   setUp(() async {
     routeBytes = null;
+    routeJson = null;
     temp = await Directory.systemTemp.createTemp('dl_engine_');
     files = FileService(temp.path);
     await files.ensureDirectories();
@@ -323,6 +336,177 @@ http://127.0.0.1:$port/c.wav
       engine.queuePlaylist('http://127.0.0.1:$port/empty.m3u8'),
       throwsA(isA<DownloadTaskException>()),
     );
+  });
+
+  test('YouTube URL parsing', () async {
+    expect(
+        YouTubeResolver.videoIdFromUrl('https://www.youtube.com/watch?v=fBgKxsvl6M8'),
+        'fBgKxsvl6M8');
+    expect(
+        YouTubeResolver.videoIdFromUrl('https://youtu.be/fBgKxsvl6M8'),
+        'fBgKxsvl6M8');
+    expect(
+        YouTubeResolver.videoIdFromUrl('https://www.youtube.com/shorts/fBgKxsvl6M8'),
+        'fBgKxsvl6M8');
+    expect(
+        YouTubeResolver.videoIdFromUrl('https://www.youtube.com/embed/fBgKxsvl6M8'),
+        'fBgKxsvl6M8');
+    expect(
+        YouTubeResolver.videoIdFromUrl(
+            'https://www.youtube.com/watch?v=fBgKxsvl6M8&list=PL8_b2d0WTcErfeETzJGV88mOOkHvAdQoL'),
+        'fBgKxsvl6M8');
+    expect(
+        YouTubeResolver.videoIdFromUrl('https://example.com/watch?v=notatube'),
+        isNull);
+
+    expect(
+        YouTubeResolver.playlistIdFromUrl(
+            'https://www.youtube.com/playlist?list=PL8_b2d0WTcErfeETzJGV88mOOkHvAdQoL'),
+        'PL8_b2d0WTcErfeETzJGV88mOOkHvAdQoL');
+    expect(
+        YouTubeResolver.playlistIdFromUrl(
+            'https://www.youtube.com/watch?v=fBgKxsvl6M8&list=PL8_b2d0WTcErfeETzJGV88mOOkHvAdQoL'),
+        'PL8_b2d0WTcErfeETzJGV88mOOkHvAdQoL');
+    expect(
+        YouTubeResolver.playlistIdFromUrl('https://www.youtube.com/watch?v=fBgKxsvl6M8'),
+        isNull);
+
+    expect(YouTubeResolver.isYouTubeUrl('https://m.youtube.com/watch?v=fBgKxsvl6M8'), isTrue);
+    expect(YouTubeResolver.isYouTubeUrl('https://example.com/a.mp3'), isFalse);
+  });
+
+  test('a page served with an audio extension is rejected as non-audio',
+      () async {
+    const html = '<!DOCTYPE html><html><head><title>not a song</title></head>'
+        '<body>youtube watch page</body></html>';
+    routeBytes = {'/page.mp3': utf8.encode(html)};
+    final task =
+        await downloads.create(url: 'http://127.0.0.1:$port/page.mp3', title: 'page');
+    await engine.start();
+    final done =
+        await _waitUntil(downloads, task.id, {DownloadTaskStatus.failed});
+    expect(done.error, contains('not a recognized audio format'));
+  });
+
+  test('YouTube playlist URL queues every track with parsed titles',
+      () async {
+    const pl = 'PL8_b2d0WTcErfeETzJGV88mOOkHvAdQoL';
+    routeJson = {
+      '/youtubei/v1/browse': {
+        'contents': {
+          'singleColumnBrowseResultsRenderer': {
+            'content': {
+              'sectionListRenderer': {
+                'contents': [
+                  {
+                    'playlistVideoListRenderer': {
+                      'contents': [
+                        {
+                          'playlistVideoRenderer': {
+                            'videoId': 'aaaaaaaaaaa',
+                            'title': {'runs': [{'text': 'First Song'}]},
+                            'ownerText': {'runs': [{'text': 'Artist One'}]},
+                          }
+                        },
+                        {
+                          'playlistVideoRenderer': {
+                            'videoId': 'bbbbbbbbbbb',
+                            'title': {'runs': [{'text': 'Second Song'}]},
+                            'ownerText': {'runs': [{'text': 'Artist Two'}]},
+                          }
+                        },
+                      ]
+                    }
+                  },
+                  {
+                    'continuationItemRenderer': {
+                      'continuationEndpoint': {'continuation': 'tok'}
+                    }
+                  },
+                ]
+              }
+            }
+          }
+        }
+      },
+      // Continuation page: nothing more.
+      '/youtubei/v1/next': {},
+    };
+    final resolver = YouTubeResolver(baseUrl: 'http://127.0.0.1:$port/youtubei/v1/');
+    final engine = DownloadEngine(
+      downloads: downloads,
+      files: files,
+      importer: importer,
+      youtube: resolver,
+    );
+    try {
+      final summary =
+          await engine.queueYouTube('https://www.youtube.com/playlist?list=$pl');
+      expect(summary.queued, 2);
+      final queued = await downloads.queued(limit: 10);
+      expect(queued.length, 2);
+      expect(queued.map((t) => t.title), ['First Song', 'Second Song']);
+      expect(queued.map((t) => t.artist), ['Artist One', 'Artist Two']);
+      expect(queued.first.url, 'https://www.youtube.com/watch?v=aaaaaaaaaaa');
+    } finally {
+      await engine.stop();
+    }
+  });
+
+  test('YouTube playlist that does not exist is rejected clearly', () async {
+    routeJson = {
+      '/youtubei/v1/browse': {
+        'alerts': [
+          {'alertRenderer': {'type': 'ERROR', 'text': {'runs': [{'text': 'The playlist does not exist.'}]}}}
+        ]
+      }
+    };
+    final resolver = YouTubeResolver(baseUrl: 'http://127.0.0.1:$port/youtubei/v1/');
+    final engine = DownloadEngine(
+      downloads: downloads, files: files, importer: importer, youtube: resolver);
+    try {
+      await expectLater(
+          engine.queueYouTube(
+              'https://www.youtube.com/playlist?list=PL8_b2d0WTcErfeETzJGV88mOOkHvAdQoL'),
+          throwsA(isA<DownloadTaskException>()));
+    } finally {
+      await engine.stop();
+    }
+  });
+
+  test('YouTube video task resolves a stream and completes as m4a', () async {
+    final wav = _wavBytes();
+    routeBytes = {'/stream-a': wav};
+    routeJson = {
+      '/youtubei/v1/player': {
+        'playabilityStatus': {'status': 'OK'},
+        'videoDetails': {'title': 'All Eyes On Me (Song Only)', 'author': 'Bo Burnham - Topic'},
+        'streamingData': {
+          'adaptiveFormats': [
+            {'mimeType': 'audio/webm; codecs="opus"', 'url': 'http://127.0.0.1:$port/stream-bad', 'averageBitrate': 128000},
+            {'mimeType': 'audio/mp4; codecs="mp4a.40.2"', 'url': 'http://127.0.0.1:$port/stream-a', 'averageBitrate': 129000},
+          ]
+        }
+      }
+    };
+    final resolver = YouTubeResolver(baseUrl: 'http://127.0.0.1:$port/youtubei/v1/');
+    final ytEngine = DownloadEngine(
+      downloads: downloads, files: files, importer: importer, youtube: resolver);
+    try {
+      final task = await downloads.create(
+          url: 'https://www.youtube.com/watch?v=fBgKxsvl6M8',
+          title: 'All Eyes On Me (Song Only)',
+          artist: 'Bo Burnham - Topic');
+      await ytEngine.start();
+      final done =
+          await _waitUntil(downloads, task.id, {DownloadTaskStatus.completed});
+      expect(done.finalPath, endsWith('.m4a'));
+      expect(done.trackId, isNotNull);
+      final count = await TrackRepository(db).trackCount();
+      expect(count, greaterThan(0));
+    } finally {
+      await ytEngine.stop();
+    }
   });
 
   test('progress is persisted while downloading', () async {

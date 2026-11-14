@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.3.2
+
+### New features
+- **YouTube downloads**: paste a YouTube video or playlist link on the
+  Downloads screen and the app resolves the highest-quality directly
+  downloadable audio stream (m4a preferred) and queues it for download.
+  Playlist URLs queue every track (up to 200); each track's stream URL is
+  resolved fresh at download time so expiring stream links never rot.
+- Downloads are now **content-validated**: files whose bytes aren't a
+  recognized audio format (e.g. a saved web page) are rejected instead of
+  registered as unplayable music.
+
+### Notes
+- YouTube access uses YouTube's public innertube endpoints (Android client)
+  without an API key. It only works for videos/playlists that are playable
+  without sign-in, and stream links are subject to YouTube's terms of
+  service — downloaded files remain your responsibility.
+
+## 0.3.1
+
+### New features
+- **M3U/M3U8 playlist downloads**: paste a playlist URL on the Downloads
+  screen and every track is queued as an individual download (titles and
+  artists read from `#EXTINF` tags, relative URLs resolved against the
+  playlist location, nested playlists skipped, 200-track cap).
+
 ## 0.3.0
 
 ### New features
