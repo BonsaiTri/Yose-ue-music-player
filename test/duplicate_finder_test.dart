@@ -76,6 +76,49 @@ void main() {
     expect(groups.first.tracks.map((t) => t.id).toSet(), {'1', '2'});
   });
 
+  test('similar titles (variant words only) group together', () {
+    final groups = findDuplicates([
+      _track('1', 'Sunset Drive', artist: 'Neon Waves'),
+      _track('2', 'Sunset Drive Remix', artist: 'Neon Waves'),
+      _track('3', 'Official Video: Neon', artist: 'Neon Waves'),
+      _track('4', 'Neon', artist: 'Neon Waves'),
+    ]);
+    expect(groups, hasLength(2));
+    final byMembers =
+        groups.map((g) => g.tracks.map((t) => t.id).toSet()).toSet();
+    expect(byMembers, containsAll({
+      {'1', '2'},
+      {'3', '4'},
+    }));
+  });
+
+  test('similar-looking but different songs do not group', () {
+    final groups = findDuplicates([
+      _track('1', 'Take Me Home', artist: 'Artist A'),
+      _track('2', 'Take Me Home Country', artist: 'Artist A'),
+      _track('3', 'Homeward', artist: 'Artist A'),
+      _track('4', 'Home', artist: 'Artist A'),
+    ]);
+    expect(groups, isEmpty);
+  });
+
+  test('similar titles with different artists do not group', () {
+    final groups = findDuplicates([
+      _track('1', 'Sunset Drive', artist: 'Artist A'),
+      _track('2', 'Sunset Drive Remix', artist: 'Artist B'),
+    ]);
+    expect(groups, isEmpty);
+  });
+
+  test('similar title with an unknown artist is treated as a duplicate', () {
+    final groups = findDuplicates([
+      _track('1', 'Sunset Drive Remix', artist: 'Neon Waves'),
+      _track('2', 'Sunset Drive', artist: ''),
+    ]);
+    expect(groups, hasLength(1));
+    expect(groups.first.tracks.map((t) => t.id).toSet(), {'1', '2'});
+  });
+
   test('keeper is recommended by play count, then duration, then age', () {
     final groups = findDuplicates([
       _track('1', 'Song', playCount: 5, durationMs: 100000),

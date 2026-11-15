@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.24 (2026-11-15)
+
+### Improved
+- **Duplicate finder now catches similar names.** "Find duplicates" in the
+  Library no longer only matches exact normalized titles — it also groups
+  tracks whose titles are the same apart from known variant words
+  (remix, live, official, video, slowed, reverb, instrumental, …), e.g.
+  "Sunset Drive" vs. "Sunset Drive Remix" or "Neon" vs.
+  "Official Video: Neon". Different songs that merely share words
+  ("Take Me Home" vs. "Take Me Home Country") and tracks by different
+  artists are still kept apart.
+
 ## 0.3.23 (2026-11-15)
 
 ### Improved

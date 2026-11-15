@@ -28,9 +28,14 @@ class DuplicateGroup {
 /// Finds groups of two or more library tracks that represent the same
 /// song.
 ///
-/// Two tracks are considered the same song when their normalized
-/// title keys match, or when both carry the same non-null content hash
-/// (identical file bytes, even if the titles differ).
+/// Two tracks are considered the same song when any of these hold:
+/// * their normalized title keys match exactly,
+/// * their normalized titles are *similar* — one contains the other and
+///   the extra words are only known variant words (remix, live, official,
+///   video, slowed, reverb, …) — with the same artist (or an unknown
+///   artist on either side), or
+/// * both carry the same non-null content hash (identical file bytes,
+///   even if the titles differ).
 List<DuplicateGroup> findDuplicates(List<Track> tracks) {
   final parent = List<int>.generate(tracks.length, (i) => i);
   int find(int i) {
@@ -65,6 +70,43 @@ List<DuplicateGroup> findDuplicates(List<Track> tracks) {
       }
     }
   });
+
+  // Similar titles: one title contains the other and the difference is
+  // only variant words ("Sunset Drive" vs. "Sunset Drive Remix").
+  // Compare within artist buckets (plus unknown-artist tracks, same
+  // conservative rule as the exact pass) so different artists never mix.
+  final keys = [
+    for (var i = 0; i < tracks.length; i++) songKey(tracks[i].title)
+  ];
+  final byArtist = <String, List<int>>{};
+  final noArtist = <int>[];
+  for (var i = 0; i < tracks.length; i++) {
+    final ak = songKey(tracks[i].artist);
+    if (ak.isEmpty) {
+      noArtist.add(i);
+    } else {
+      byArtist.putIfAbsent(ak, () => []).add(i);
+    }
+  }
+  void _maybeSimilar(int i, Iterable<int> candidates) {
+    final ka = keys[i];
+    if (ka.isEmpty) return;
+    for (final j in candidates) {
+      if (j == i) continue;
+      final kb = keys[j];
+      if (kb.isEmpty || ka == kb) continue; // exact pass already handled it
+      // Variant words can only add a bounded amount of length.
+      if ((ka.length - kb.length).abs() > 24) continue;
+      if (_similarTitleKeys(ka, kb)) union(i, j);
+    }
+  }
+
+  for (var i = 0; i < tracks.length; i++) {
+    final ak = songKey(tracks[i].artist);
+    _maybeSimilar(i, byArtist[ak] ?? const <int>[]);
+    if (ak.isNotEmpty) _maybeSimilar(i, noArtist);
+  }
+
   byHash.values.forEach((idxs) {
     for (var i = 1; i < idxs.length; i++) union(idxs[0], idxs[i]);
   });
@@ -101,4 +143,57 @@ List<DuplicateGroup> findDuplicates(List<Track> tracks) {
     groups.add(DuplicateGroup(key: key, titleKey: titleKey, tracks: members));
   }
   return groups;
+}
+
+/// Words that mark a known variant of the same song rather than a
+/// different song ("Sunset Drive Remix", "Official Video", "(Live)", …).
+const Set<String> _variantWords = {
+  'remix', 'remixes', 'remastered', 'remaster', 'live', 'official',
+  'video', 'mvs', 'audio', 'song', 'instrumental', 'inst', 'slowed',
+  'reverb', 'acoustic', 'cover', 'covers', 'session', 'sessions',
+  'edit', 'mix', 'mixed', 'radio', 'single', 'version', 'ver', 'feat',
+  'featuring', 'ft', 'karaoke', 'uncensored', 'explicit', 'clean',
+  'demo', 'preview', 'full', 'hd', '4k', 'hq', 'stereo', 'visualizer',
+  'lyric', 'lyrics', 'officialaudio', 'officialvideo',
+};
+
+/// True when two distinct normalized title keys are similar: one is a
+/// whole-word substring of the other and every extra word is a known
+/// variant word. "sunset drive" vs. "sunset drive remix" → true;
+/// "take me home" vs. "take me home country" → false.
+bool _similarTitleKeys(String a, String b) {
+  if (a.isEmpty || b.isEmpty) return false;
+  String shortKey = a;
+  String longKey = b;
+  if (shortKey.length > longKey.length) {
+    shortKey = b;
+    longKey = a;
+  }
+  if (shortKey == longKey) return false;
+  final idx = _wholeWordIndex(longKey, shortKey);
+  if (idx < 0) return false;
+  final head = idx == 0 ? '' : longKey.substring(0, idx - 1);
+  final tail = idx + shortKey.length == longKey.length
+      ? ''
+      : longKey.substring(idx + shortKey.length + 1);
+  final extra =
+      '$head $tail'.split(RegExp(r'\s+')).where((w) => w.isNotEmpty);
+  if (extra.isEmpty) return false;
+  return extra.every(_variantWords.contains);
+}
+
+/// Index of [needle] inside [haystack] bounded by word boundaries
+/// (keys are single-space separated), or -1.
+int _wholeWordIndex(String haystack, String needle) {
+  var from = 0;
+  while (true) {
+    final i = haystack.indexOf(needle, from);
+    if (i < 0) return -1;
+    final before = i == 0 ? ' ' : haystack[i - 1];
+    final after = i + needle.length >= haystack.length
+        ? ' '
+        : haystack[i + needle.length];
+    if (before == ' ' && after == ' ') return i;
+    from = i + 1;
+  }
 }
