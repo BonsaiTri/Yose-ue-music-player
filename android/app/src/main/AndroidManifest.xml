@@ -10,6 +10,10 @@
          mediaPlayback). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- Android 13+: the media notification (lock screen controls) is
+         silently dropped without this. Requested at runtime on first play.
+         No-op on older Android (auto-granted). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:label="Yose-ue Music Player"

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.10 (2026-11-15)
+
+### Fixed
+- **Lock screen / media controls missing on Android.** The media notification
+  (play/pause/next on the lock screen and status bar) was silently dropped
+  because Android 13+ requires the `POST_NOTIFICATIONS` permission, which
+  the app never requested. The app now asks for it the first time you press
+  play — grant it and controls appear immediately. (No-op on older
+  Android, which grants it automatically.)
+
 ## 0.3.9 (2026-11-15)
 
 ### Added

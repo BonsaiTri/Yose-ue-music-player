@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import 'package:music_player/core/logging/app_logger.dart';
 import 'package:music_player/database/database.dart';
@@ -287,6 +288,7 @@ class PlaybackController {
 
   Timer? _saveTimer;
   bool _initialized = false;
+  bool _askedNotificationPermission = false;
 
   Future<void> init() async {
     if (_initialized) return;
@@ -342,9 +344,31 @@ class PlaybackController {
     });
   }
 
+  /// Android 13+: without POST_NOTIFICATIONS the system drops the media
+  /// notification silently, so there are no lock screen controls. Ask on
+  /// first play; on older Android this auto-grants without a dialog.
+  Future<void> _ensureNotificationPermission() async {
+    if (_askedNotificationPermission || !Platform.isAndroid) return;
+    _askedNotificationPermission = true;
+    try {
+      final status = await Permission.notification.request();
+      if (status.isGranted) {
+        AppLogger.info('Notification permission granted', tag: 'playback');
+      } else {
+        AppLogger.warning(
+            'Notification permission ${status.name} — lock screen controls will not appear until it is granted in system settings',
+            tag: 'playback');
+      }
+    } catch (e) {
+      AppLogger.warning('Notification permission request failed: $e',
+          tag: 'playback');
+    }
+  }
+
   /// Plays [tracks] starting at [startIndex].
   Future<void> playQueue(List<Track> tracks, {int startIndex = 0}) async {
     if (tracks.isEmpty) return;
+    await _ensureNotificationPermission();
     _handler.libraryQueue = List.of(tracks);
     _handler._publishItem();
     final source = ConcatenatingAudioSource(
