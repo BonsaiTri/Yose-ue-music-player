@@ -532,12 +532,19 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen>
           if (inFlight)
             LinearProgressIndicator(
                 value: task.progress == 0 ? null : task.progress),
-          if (bytes > 0)
+          if (!inFlight &&
+              status == DownloadTaskStatus.queued)
+            const LinearProgressIndicator(),
+          if (inFlight)
             Text(
-                '${_fmtBytes(bytes)}${status == DownloadTaskStatus.downloading && speed > 0 ? ' · ${_fmtBytes(speed)}/s' : ''}',
+                '${task.progress == 0 ? '' : '${(task.progress * 100).round()}% · '}${bytes > 0 ? _fmtBytes(bytes) : 'preparing'}${status == DownloadTaskStatus.downloading && speed > 0 ? ' · ${_fmtBytes(speed)}/s' : ''}',
                 style: const TextStyle(fontSize: 11)),
           if (task.error != null)
-            Text(task.error!, style: const TextStyle(color: Colors.red)),
+            Text(task.error!, style: const TextStyle(color: Colors.red, fontSize: 11)),
+          if (!inFlight &&
+              status == DownloadTaskStatus.queued &&
+              bytes > 0)
+            Text(_fmtBytes(bytes), style: const TextStyle(fontSize: 11)),
         ],
       ),
       trailing: Row(

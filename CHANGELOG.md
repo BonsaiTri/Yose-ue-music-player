@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.15 (2026-11-15)
+
+### Added
+- **Download progress bars.** In-progress tasks show a determinate bar with
+  percentage, downloaded size and speed; waiting queue tasks show an
+  indeterminate bar.
+
+### Fixed
+- **YouTube downloads failing with “No address associated with hostname”.**
+  The Python runtime bundled in the AAR can lose system DNS resolution
+  inside the app sandbox even when the device itself resolves fine. The
+  pinned yt-dlp script now falls back to DNS-over-HTTPS (Google/Cloudflare)
+  whenever the built-in resolver fails for a hostname, so YouTube
+  downloads and searches keep working in that state.
+
 ## 0.3.14 (2026-11-15)
 
 ### Added

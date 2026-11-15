@@ -217,7 +217,9 @@ class YoutubeDlPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
      * A marker file pins the version so upgrades are idempotent.
      */
     private fun installPinnedYtDlp(appCtx: Context, base: File) {
-        val pinned = "2026.10.26"
+        // 2026.10.26-doh1: the pinned script carries a DNS-over-HTTPS
+        // fallback for the AAR's flaky in-sandbox hostname resolution.
+        val pinned = "2026.10.26-doh1"
         val script = File(File(base, "yt-dlp"), "yt-dlp")
         val marker = File(base, ".yt-dlp-version")
         if (script.exists() && marker.exists() && marker.readText().trim() == pinned) return
