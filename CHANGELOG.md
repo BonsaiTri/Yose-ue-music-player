@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.14 (2026-11-15)
+
+### Added
+- **Retry all failed downloads.** The History section in the Downloads
+  screen now has a one-tap "retry all" button (shown whenever at least one
+  task has failed) that re-queues every failed task at once; individual
+  retry buttons are unchanged.
+
 ## 0.3.13 (2026-11-15)
 
 ### Added

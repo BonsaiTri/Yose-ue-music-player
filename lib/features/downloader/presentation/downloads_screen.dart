@@ -110,6 +110,23 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen>
     }
   }
 
+  /// Re-queues every failed download in one action.
+  Future<void> _retryAllFailed() async {
+    setState(() => _adding = true);
+    try {
+      final count =
+          await ref.read(appDepsProvider).downloader.retryFailed();
+      await _load();
+      _showSnack(count > 0
+          ? 'Retried $count failed download${count == 1 ? '' : 's'}'
+          : 'No failed downloads to retry');
+    } catch (e) {
+      _showSnack('Could not retry failed downloads: $e');
+    } finally {
+      if (mounted) setState(() => _adding = false);
+    }
+  }
+
   /// Asks for confirmation, then deletes all finished download records.
   /// Music and files in the library are not affected.
   Future<void> _confirmClearHistory() async {
@@ -396,6 +413,13 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen>
                     style:
                         const TextStyle(fontWeight: FontWeight.bold)),
               ),
+              if (_history
+                  .any((t) => t.status == DownloadTaskStatus.failed))
+                IconButton(
+                  icon: const Icon(Icons.replay),
+                  tooltip: 'Retry all failed downloads',
+                  onPressed: _retryAllFailed,
+                ),
               IconButton(
                 icon: const Icon(Icons.delete_sweep),
                 tooltip: 'Clear history',

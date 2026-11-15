@@ -237,6 +237,30 @@ void main() {
     expect(File(done.finalPath!).existsSync(), isTrue);
   });
 
+  test('retryFailed re-queues every failed task and reports the count',
+      () async {
+    final t1 = await downloads.create(url: 'http://x/1.wav', title: 'One');
+    final t2 = await downloads.create(url: 'http://x/2.wav', title: 'Two');
+    final t3 = await downloads.create(url: 'http://x/3.wav', title: 'Three');
+    await downloads
+        .updateStatus(t1.id, DownloadTaskStatus.failed, error: 'boom');
+    await downloads
+        .updateStatus(t2.id, DownloadTaskStatus.failed, error: 'boom');
+    // A completed task must not be touched by a bulk retry.
+    await downloads.updateStatus(t3.id, DownloadTaskStatus.completed);
+
+    final retried = await engine.retryFailed();
+    expect(retried, 2);
+    expect((await downloads.byId(t1.id))!.status, DownloadTaskStatus.queued);
+    expect((await downloads.byId(t2.id))!.status, DownloadTaskStatus.queued);
+    expect((await downloads.byId(t3.id))!.status, DownloadTaskStatus.completed);
+    // Progress/error are reset on retry.
+    expect((await downloads.byId(t1.id))!.error, isNull);
+    expect((await downloads.byId(t1.id))!.progress, 0);
+    // A second bulk retry finds nothing left to retry.
+    expect(await engine.retryFailed(), 0);
+  });
+
   test('cancel while downloading stops the transfer and cleans up', () async {
     final wav = _wavBytes(seconds: 2);
     serveBytes = wav;

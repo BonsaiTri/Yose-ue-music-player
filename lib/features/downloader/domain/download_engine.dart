@@ -524,6 +524,17 @@ class DownloadEngine {
   /// Re-queues a failed, cancelled or paused task.
   Future<void> retry(String id) => downloads.retry(id);
 
+  /// Re-queues every failed task in one action. Returns how many were
+  /// retried (0 when there is nothing to retry). The periodic poll picks
+  /// them up on its own.
+  Future<int> retryFailed() async {
+    final failed = await downloads.failed();
+    for (final task in failed) {
+      await downloads.retry(task.id);
+    }
+    return failed.length;
+  }
+
   void _tick() {
     _tickAsync().catchError((Object e, StackTrace st) {
       AppLogger.error('Download poll failed: $e', tag: 'download');

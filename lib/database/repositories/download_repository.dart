@@ -33,6 +33,13 @@ class DownloadRepository {
           orderBy([(t) => OrderingTerm.desc(t.updatedAt)]))
           .get();
 
+  /// Every task that ended in a failed state (newest first).
+  Future<List<DownloadTask>> failed() =>
+      (db.select(db.downloadTasks)
+          ..where((t) => t.status.equalsValue(DownloadTaskStatus.failed))
+          ..orderBy([(t) => OrderingTerm.desc(t.updatedAt)]))
+          .get();
+
   Future<List<DownloadTask>> history({int limit = 100}) =>
       (db.select(db.downloadTasks)
           ..where((t) =>
