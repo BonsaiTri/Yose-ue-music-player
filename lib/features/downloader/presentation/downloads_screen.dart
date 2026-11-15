@@ -169,6 +169,17 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen>
     }
   }
 
+  /// Opens a sheet that searches YouTube for other available uploads of a
+  /// song whose original video is dead.
+  Future<void> _suggestVersions(DownloadTask task) async {
+    final result = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => _SuggestVersionsSheet(task: task),
+    );
+    if (result == true && mounted) await _load();
+  }
+
   Future<void> _queueSearchResult(YtDlpEntry entry) async {
     AppLogger.info('YT search result tapped: "${entry.title}"', tag: 'download');
     try {
@@ -555,6 +566,19 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen>
                   : task.error!,
               style: const TextStyle(color: Colors.red, fontSize: 11),
             ),
+          if (isFailed &&
+              DownloadEngine.isPermanentFailure(task.error) &&
+              YouTubeResolver.isYouTubeUrl(task.url))
+            TextButton.icon(
+              onPressed: () => _suggestVersions(task),
+              icon: const Icon(Icons.recommend, size: 16),
+              label: const Text('Suggest an available version',
+                  style: TextStyle(fontSize: 12)),
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+              ),
+            ),
           if (!inFlight &&
               status == DownloadTaskStatus.queued &&
               bytes > 0)
@@ -606,6 +630,140 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen>
       return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
     }
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
+  }
+}
+
+/// Bottom sheet offering other available YouTube uploads for a song whose
+/// original video is dead (removed, private, or Premium-only).
+class _SuggestVersionsSheet extends ConsumerStatefulWidget {
+  const _SuggestVersionsSheet({required this.task});
+
+  final DownloadTask task;
+
+  @override
+  ConsumerState<_SuggestVersionsSheet> createState() =>
+      _SuggestVersionsSheetState();
+}
+
+class _SuggestVersionsSheetState extends ConsumerState<_SuggestVersionsSheet> {
+  List<YtDlpEntry>? _entries;
+  String? _error;
+  bool _queuing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final entries = await ref
+          .read(appDepsProvider)
+          .downloader
+          .suggestAlternatives(widget.task.id);
+      if (!mounted) return;
+      setState(() {
+        if (entries == null) {
+          _error = 'This source is not a YouTube video.';
+        } else {
+          _entries = entries;
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = '$e');
+    }
+  }
+
+  Future<void> _queue(YtDlpEntry entry) async {
+    setState(() => _queuing = true);
+    try {
+      final summary = await ref
+          .read(appDepsProvider)
+          .downloader
+          .queueYouTube(entry.watchUrl);
+      if (!mounted) return;
+      if (summary.queued == 0) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(
+                '“${entry.title}” is already downloaded or in the queue')));
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('“${entry.title}” queued for download')));
+      Navigator.of(context).pop(true);
+    } on AlreadyDownloadedError catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } on AlreadyInQueueError catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not queue: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _queuing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final entries = _entries;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('Original video is unavailable',
+                style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Text('Other available uploads of “${widget.task.title}”',
+                style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 12),
+            if (_error != null)
+              Text(_error!, style: const TextStyle(color: Colors.red))
+            else if (entries == null)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (entries.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child:
+                    Text('No other versions found on YouTube.'),
+              )
+            else
+              ...entries.map(
+                (e) => ListTile(
+                  leading: _SearchThumb(url: e.thumbnail),
+                  title: Text(e.title),
+                  subtitle:
+                      e.channel == null || e.channel!.isEmpty
+                          ? null
+                          : Text(e.channel!),
+                  trailing: _queuing
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.download),
+                  onTap: () => _queue(e),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

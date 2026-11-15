@@ -743,6 +743,59 @@ http://127.0.0.1:$port/c.wav
     }
   });
 
+  test('suggestAlternatives returns other uploads and drops the dead video',
+      () async {
+    const deadId = 'DEADDEADDE1';
+    final dead = await downloads.create(
+        url: 'https://www.youtube.com/watch?v=$deadId',
+        title: 'Neon Waves (Official Video)',
+        artist: 'Wave Rider');
+    await downloads.updateStatus(
+        dead.id,
+        DownloadTaskStatus.failed,
+        error: 'ERROR: [youtube] $deadId: Video unavailable. This video is '
+            'not available');
+    final fake = _FakeYtDlp(entries: const [
+      // The dead video can still appear in search results; it must be
+      // dropped.
+      YtDlpEntry(id: 'DEADDEADDE1', title: 'Neon Waves (Official Video)'),
+      YtDlpEntry(id: 'ALTONE12345', title: 'Neon Waves', channel: 'Wave Rider'),
+      YtDlpEntry(id: 'ALTONE12345', title: 'Neon Waves (reupload)'),
+      YtDlpEntry(
+          id: 'ALTWO678901',
+          title: 'Neon Waves (Lyric Video)',
+          channel: 'Someone Else'),
+    ]);
+    final engine = DownloadEngine(
+        downloads: downloads, files: files, importer: importer, ytDlp: fake);
+    try {
+      final alts = await engine.suggestAlternatives(dead.id);
+      expect(alts, isNotNull);
+      expect(alts!.map((e) => e.id), ['ALTONE12345', 'ALTWO678901']);
+      // The search query is built from the normalized title + artist.
+      expect(fake.calls.any((c) => c.contains('neon waves Wave Rider')),
+          isTrue);
+    } finally {
+      await engine.stop();
+    }
+  });
+
+  test('suggestAlternatives returns null for non-YouTube sources', () async {
+    final task =
+        await downloads.create(url: 'http://x/a.mp3', title: 'A');
+    await downloads.updateStatus(task.id, DownloadTaskStatus.failed,
+        error: 'Playlist fetch failed: HTTP 404');
+    final fake = _FakeYtDlp(entries: const []);
+    final engine = DownloadEngine(
+        downloads: downloads, files: files, importer: importer, ytDlp: fake);
+    try {
+      expect(await engine.suggestAlternatives(task.id), isNull);
+      expect(fake.calls, isEmpty);
+    } finally {
+      await engine.stop();
+    }
+  });
+
   test('clearHistory removes only finished records, keeps queued tasks',
       () async {
     final kept = await downloads.create(

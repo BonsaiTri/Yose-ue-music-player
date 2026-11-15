@@ -576,6 +576,55 @@ class DownloadEngine {
     }
   }
 
+  /// Suggests other, available uploads of the same song for a task whose
+  /// source video is gone (removed, private, or Premium-only). Searches
+  /// YouTube for the task's title/artist, drops the dead video and
+  /// duplicate ids, and returns up to [maxResults] candidates. Returns
+  /// null when the task's source is not a YouTube video or the YouTube
+  /// backend is unavailable (e.g. direct-URL tasks).
+  Future<List<YtDlpEntry>?> suggestAlternatives(
+    String taskId, {
+    int maxResults = 5,
+  }) async {
+    final task = await downloads.byId(taskId);
+    if (task == null) return null;
+    if (!YouTubeResolver.isYouTubeUrl(task.url)) return null;
+    if (ytDlp == null) return null;
+    final query = [songKey(task.title), task.artist.trim()]
+        .where((s) => s.isNotEmpty)
+        .take(2)
+        .join(' ');
+    if (query.trim().isEmpty) return null;
+    final deadId = _videoIdOf(task.url);
+    final results =
+        await searchYouTube(query, maxResults: maxResults + 2);
+    final seen = <String>{};
+    final out = <YtDlpEntry>[];
+    for (final e in results) {
+      if (e.id == deadId) continue;
+      if (!seen.add(e.id)) continue;
+      out.add(e);
+      if (out.length >= maxResults) break;
+    }
+    return out;
+  }
+
+  /// The YouTube video id of a watch/shorts/youtu.be URL, or null.
+  static String? _videoIdOf(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return null;
+    final host = uri.host.toLowerCase();
+    if (host == 'youtu.be' && uri.pathSegments.isNotEmpty) {
+      final id = uri.pathSegments.first;
+      return id.isNotEmpty ? id : null;
+    }
+    if (host.endsWith('youtube.com')) {
+      final v = uri.queryParameters['v'];
+      if (v != null && v.isNotEmpty) return v;
+    }
+    return null;
+  }
+
   /// Fetches a playlist body (bounded to 2 MB).
   Future<String> _fetchPlaylist(Uri uri) async {
     final client = _client ?? HttpClient()..connectionTimeout = _connectTimeout;

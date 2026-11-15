@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.21 (2026-11-15)
+
+### Added
+- **"Suggest an available version" for dead downloads.** When a YouTube
+  download fails because the source video is gone (removed, private, or
+  Premium-only), the History list now offers a one-tap action that searches
+  YouTube for other available uploads of the same song. Tap one of the
+  suggested versions to queue it for download.
+
 ## 0.3.20 (2026-11-15)
 
 ### Improved
