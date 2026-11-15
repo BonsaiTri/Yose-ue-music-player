@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:music_player/core/constants/app_constants.dart';
 import 'package:music_player/core/logging/app_logger.dart';
 import 'package:music_player/core/services/file_service.dart';
+import 'package:music_player/core/services/song_key.dart';
 import 'package:music_player/database/database.dart';
 import 'package:music_player/database/repositories/download_repository.dart';
 import 'package:music_player/database/repositories/playlist_settings_history_repository.dart';
@@ -337,21 +338,9 @@ class DownloadEngine {
     return false;
   }
 
-  /// Normalized comparison key for song titles/artists.
-  static String _songKey(String raw) {
-    var s = raw.trim().toLowerCase();
-    // Strip a short trailing parenthetical/bracket suffix, e.g.
-    // "(official music video)", "(live)".
-    final close = s.lastIndexOf(RegExp(r'[)\]]'));
-    if (close >= 1 && close == s.length - 1) {
-      final openParen = s.lastIndexOf('(', close);
-      final openBracket = s.lastIndexOf('[', close);
-      final openAt = openParen > openBracket ? openParen : openBracket;
-      if (openAt > 0 && close - openAt <= 40) s = s.substring(0, openAt);
-    }
-    s = s.replaceAll(RegExp(r'[^a-z0-9 ]'), '');
-    return s.replaceAll(RegExp(r'\s+'), ' ').trim();
-  }
+  /// Normalized comparison key for song titles/artists (shared with the
+  /// library duplicate cleanup).
+  static String _songKey(String raw) => songKey(raw);
 
   /// True when a completed task's music is still reachable: its library
   /// track exists, or the final file is still on disk.

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.19 (2026-11-15)
+
+### Added
+- **Duplicate cleanup in the Library.** The Library screen now has a
+  "Find duplicates" button (the fact-check icon in the top bar). It scans
+  the whole library and groups tracks that are the same song — same
+  normalized title + artist, or identical file contents (same hash),
+  including copies like "Song (Official Video)" vs "Song". For each group
+  you can pick which copy to keep (the most-played one is preselected, or
+  any copy) and delete the extra copies along with their audio files —
+  per group or all at once. The library list refreshes when you go back.
+
 ## 0.3.18 (2026-11-15)
 
 ### Fixed

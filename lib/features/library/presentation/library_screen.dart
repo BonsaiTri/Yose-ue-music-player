@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:music_player/app/bootstrap.dart';
 import 'package:music_player/database/database.dart';
+import 'package:music_player/features/library/presentation/duplicate_cleanup_page.dart';
 import 'package:music_player/features/media_import/presentation/import_picker.dart';
 import 'package:music_player/features/search/presentation/search_screen.dart';
 import 'package:music_player/shared/widgets/add_to_playlist_sheet.dart';
@@ -81,6 +82,13 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
     }
   }
 
+  Future<void> _findDuplicates() async {
+    final result = await Navigator.of(context).push<DuplicateCleanupResult>(
+      MaterialPageRoute(builder: (_) => const DuplicateCleanupPage()),
+    );
+    if (result == DuplicateCleanupResult.deleted && mounted) _load();
+  }
+
   Future<void> _import() async {
     setState(() => _importing = true);
     final result = await pickAndImport(context, ref);
@@ -114,6 +122,11 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
                 },
               ),
             ),
+          IconButton(
+            icon: const Icon(Icons.fact_check),
+            tooltip: 'Find duplicates',
+            onPressed: _findDuplicates,
+          ),
           IconButton(
             icon: _importing
                 ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
