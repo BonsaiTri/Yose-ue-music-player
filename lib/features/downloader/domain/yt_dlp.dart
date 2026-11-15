@@ -64,6 +64,11 @@ abstract class YtDlpBackend {
   /// Flat listing of a video or playlist (no media downloaded).
   Future<List<YtDlpEntry>> list(String url);
 
+  /// Best-effort playlist title (the human name of a playlist URL). Returns
+  /// null for single videos or on any failure — callers must not treat this
+  /// as a hard dependency.
+  Future<String?> playlistTitle(String url);
+
   /// Downloads the best audio stream for [url] (m4a preferred) into
   /// [workDir] and returns the final file path.
   ///
@@ -224,6 +229,19 @@ class AndroidYtDlp implements YtDlpBackend {
   }
 
   @override
+  Future<String?> playlistTitle(String url) async {
+    await ensureReady();
+    try {
+      final out = await _channel.invokeMethod<String>('title', {'url': url});
+      return _firstTitle(out);
+    } on PlatformException catch (e) {
+      AppLogger.warning('yt-dlp playlist title failed: ${e.message}',
+          tag: 'yt-dlp');
+      return null;
+    }
+  }
+
+  @override
   Future<List<YtDlpEntry>> list(String url) async {
     await ensureReady();
     try {
@@ -315,6 +333,17 @@ class AndroidYtDlp implements YtDlpBackend {
     final message = e.message ?? 'yt-dlp failed';
     final tail = _tail(message, 400);
     return e.code == 'cancelled' ? 'cancelled' : tail;
+  }
+
+  /// `--print playlist_title` emits one line per entry; the first
+  /// meaningful line is the title.
+  static String? _firstTitle(String? out) {
+    if (out == null || out.isEmpty) return null;
+    for (final line in out.split('\n')) {
+      final t = line.trim();
+      if (t.isNotEmpty && t != 'NA') return t;
+    }
+    return null;
   }
 
   @override
@@ -430,6 +459,26 @@ class DesktopYtDlp implements YtDlpBackend {
   List<String> get _command {
     final binary = _binaryPath;
     return PlatformInfo.isLinux ? ['python3', binary] : [binary];
+  }
+
+  @override
+  Future<String?> playlistTitle(String url) async {
+    await ensureReady();
+    try {
+      final result = await Process.run(
+        _command.first,
+        [..._command.skip(1),
+         '--flat-playlist',
+         '--print',
+         'playlist_title',
+         '--no-warnings',
+         url],
+      ).timeout(const Duration(seconds: 90));
+      if (result.exitCode != 0) return null;
+      return AndroidYtDlp._firstTitle(result.stdout as String);
+    } catch (_) {
+      return null; // best-effort
+    }
   }
 
   @override

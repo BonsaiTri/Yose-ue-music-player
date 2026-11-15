@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -86,6 +88,11 @@ class _PlaylistsScreenState extends ConsumerState<PlaylistsScreen> {
               onTap: () => Navigator.pop(ctx, 'play'),
             ),
             ListTile(
+              leading: const Icon(Icons.shuffle),
+              title: const Text('Shuffle play'),
+              onTap: () => Navigator.pop(ctx, 'shuffle'),
+            ),
+            ListTile(
               leading: const Icon(Icons.edit_outlined),
               title: const Text('Rename'),
               onTap: () => Navigator.pop(ctx, 'rename'),
@@ -105,6 +112,15 @@ class _PlaylistsScreenState extends ConsumerState<PlaylistsScreen> {
       final tracks = await ref.read(appDepsProvider).playlists.tracks(playlist.id);
       if (tracks.isNotEmpty) {
         ref.read(playerProvider).playQueue(tracks);
+      } else {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('This playlist is empty')));
+      }
+    } else if (action == 'shuffle') {
+      final tracks = await ref.read(appDepsProvider).playlists.tracks(playlist.id);
+      if (tracks.isNotEmpty) {
+        final shuffled = List.of(tracks)..shuffle(Random());
+        ref.read(playerProvider).playQueue(shuffled);
       } else {
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('This playlist is empty')));

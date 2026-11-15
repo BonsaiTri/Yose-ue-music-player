@@ -18,6 +18,21 @@ class PlaylistRepository {
   Future<Playlist?> byId(String id) =>
       (db.select(db.playlists)..where((p) => p.id.equals(id))).getSingleOrNull();
 
+  /// Finds a playlist by exact name, falling back to a case-insensitive
+  /// match so a re-download of the same source lands in the same playlist.
+  /// (Listed in memory — the playlist list is small.)
+  Future<Playlist?> byName(String name) async {
+    final exact =
+        await (db.select(db.playlists)..where((p) => p.name.equals(name)))
+            .getSingleOrNull();
+    if (exact != null) return exact;
+    final all = await db.select(db.playlists).get();
+    for (final p in all) {
+      if (p.name.toLowerCase() == name.toLowerCase()) return p;
+    }
+    return null;
+  }
+
   Future<Playlist> create(String name) async {
     final now = DateTime.now();
     final playlist = Playlist(id: _uuid.v4(), name: name, createdAt: now, updatedAt: now);

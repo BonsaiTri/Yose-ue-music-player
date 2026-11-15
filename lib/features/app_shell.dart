@@ -303,6 +303,36 @@ class _HomePageState extends ConsumerState<_HomePage> {
     await ref.read(playerProvider).playQueue(shuffled);
   }
 
+  Future<void> _createPlaylist() async {
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('New playlist'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'Playlist name'),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty) return;
+    await ref.read(appDepsProvider).playlists.create(name);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Playlist “$name” created')));
+      await _load();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -443,6 +473,11 @@ class _HomePageState extends ConsumerState<_HomePage> {
                   onPressed: _shuffleAll,
                   icon: const Icon(Icons.shuffle),
                   label: const Text('Shuffle'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _createPlaylist,
+                  icon: const Icon(Icons.playlist_add),
+                  label: const Text('New playlist'),
                 ),
               ],
             ),

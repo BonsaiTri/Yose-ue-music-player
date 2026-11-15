@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -161,6 +163,12 @@ class _PlaylistDetailPageState extends ConsumerState<PlaylistDetailPage> {
   void _playFrom(List<Track> list, int index) =>
       ref.read(playerProvider).playQueue(list, startIndex: index);
 
+  void _shuffle() {
+    if (_tracks.isEmpty) return;
+    final shuffled = List.of(_tracks)..shuffle(Random());
+    ref.read(playerProvider).playQueue(shuffled);
+  }
+
   Future<void> _pickTracks() async {
     final added = await Navigator.of(context).push<int>(
       MaterialPageRoute(
@@ -180,12 +188,18 @@ class _PlaylistDetailPageState extends ConsumerState<PlaylistDetailPage> {
       appBar: AppBar(
         title: Text(widget.playlist.name),
         actions: [
-          if (!loading && _tracks.isNotEmpty)
+          if (!loading && _tracks.isNotEmpty) ...[
             IconButton(
               icon: const Icon(Icons.play_circle_fill),
               tooltip: 'Play all',
               onPressed: () => _playFrom(_tracks, 0),
             ),
+            IconButton(
+              icon: const Icon(Icons.shuffle),
+              tooltip: 'Shuffle play',
+              onPressed: _shuffle,
+            ),
+          ],
           IconButton(
             icon: const Icon(Icons.sort),
             tooltip: _sort.label,

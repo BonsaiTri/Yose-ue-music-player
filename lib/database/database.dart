@@ -33,7 +33,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.withFile(File file) : super(NativeDatabase(file));
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration {
@@ -42,6 +42,7 @@ class AppDatabase extends _$AppDatabase {
       onUpgrade: (m, from, to) async {
         if (from < 1) await _migrateToV1(m);
         if (from < 2) await _migrateToV2(m);
+        if (from < 3) await _migrateToV3(m);
       },
       beforeOpen: (details) async {
         await customStatement('PRAGMA foreign_keys = ON');
@@ -100,6 +101,17 @@ class AppDatabase extends _$AppDatabase {
         'CREATE INDEX IF NOT EXISTS tracks_file_availability ON tracks(file_availability)');
     await customStatement(
         'CREATE INDEX IF NOT EXISTS download_tasks_status ON download_tasks(status)');
+  }
+
+  Future<void> _migrateToV3(Migrator m) async {
+    // Playlist downloads: tasks can be owned by an app playlist. Deleting a
+    // playlist must not touch tasks or their music, so the reference
+    // degrades to NULL.
+    await customStatement('''
+      ALTER TABLE download_tasks
+        ADD COLUMN playlist_id TEXT
+        REFERENCES playlists(id) ON DELETE SET NULL
+    ''');
   }
 
   /// Full-text search over track metadata. Returns matching track ids in

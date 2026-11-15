@@ -3336,6 +3336,15 @@ class $DownloadTasksTable extends DownloadTasks
       requiredDuringInsert: false,
       defaultConstraints: GeneratedColumn.constraintIsAlways(
           'REFERENCES tracks (id) ON DELETE CASCADE'));
+  static const VerificationMeta _playlistIdMeta =
+      const VerificationMeta('playlistId');
+  @override
+  late final GeneratedColumn<String> playlistId = GeneratedColumn<String>(
+      'playlist_id', aliasedName, true,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultConstraints: GeneratedColumn.constraintIsAlways(
+          'REFERENCES playlists (id) ON DELETE SET NULL'));
   static const VerificationMeta _urlMeta = const VerificationMeta('url');
   @override
   late final GeneratedColumn<String> url = GeneratedColumn<String>(
@@ -3439,6 +3448,7 @@ class $DownloadTasksTable extends DownloadTasks
   List<GeneratedColumn> get $columns => [
         id,
         trackId,
+        playlistId,
         url,
         title,
         artist,
@@ -3473,6 +3483,12 @@ class $DownloadTasksTable extends DownloadTasks
     if (data.containsKey('track_id')) {
       context.handle(_trackIdMeta,
           trackId.isAcceptableOrUnknown(data['track_id']!, _trackIdMeta));
+    }
+    if (data.containsKey('playlist_id')) {
+      context.handle(
+          _playlistIdMeta,
+          playlistId.isAcceptableOrUnknown(
+              data['playlist_id']!, _playlistIdMeta));
     }
     if (data.containsKey('url')) {
       context.handle(
@@ -3553,6 +3569,8 @@ class $DownloadTasksTable extends DownloadTasks
           .read(DriftSqlType.string, data['${effectivePrefix}id'])!,
       trackId: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}track_id']),
+      playlistId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}playlist_id']),
       url: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}url'])!,
       title: attachedDatabase.typeMapping
@@ -3601,6 +3619,10 @@ class DownloadTask extends DataClass implements Insertable<DownloadTask> {
 
   /// Associated library track once registered (nullable while downloading).
   final String? trackId;
+
+  /// Owning playlist when the task came from a playlist download. Deleting
+  /// the playlist keeps the task (and its track) — the link just goes away.
+  final String? playlistId;
   final String url;
   final String title;
   final String artist;
@@ -3619,6 +3641,7 @@ class DownloadTask extends DataClass implements Insertable<DownloadTask> {
   const DownloadTask(
       {required this.id,
       this.trackId,
+      this.playlistId,
       required this.url,
       required this.title,
       required this.artist,
@@ -3640,6 +3663,9 @@ class DownloadTask extends DataClass implements Insertable<DownloadTask> {
     map['id'] = Variable<String>(id);
     if (!nullToAbsent || trackId != null) {
       map['track_id'] = Variable<String>(trackId);
+    }
+    if (!nullToAbsent || playlistId != null) {
+      map['playlist_id'] = Variable<String>(playlistId);
     }
     map['url'] = Variable<String>(url);
     map['title'] = Variable<String>(title);
@@ -3676,6 +3702,9 @@ class DownloadTask extends DataClass implements Insertable<DownloadTask> {
       trackId: trackId == null && nullToAbsent
           ? const Value.absent()
           : Value(trackId),
+      playlistId: playlistId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(playlistId),
       url: Value(url),
       title: Value(title),
       artist: Value(artist),
@@ -3707,6 +3736,7 @@ class DownloadTask extends DataClass implements Insertable<DownloadTask> {
     return DownloadTask(
       id: serializer.fromJson<String>(json['id']),
       trackId: serializer.fromJson<String?>(json['trackId']),
+      playlistId: serializer.fromJson<String?>(json['playlistId']),
       url: serializer.fromJson<String>(json['url']),
       title: serializer.fromJson<String>(json['title']),
       artist: serializer.fromJson<String>(json['artist']),
@@ -3731,6 +3761,7 @@ class DownloadTask extends DataClass implements Insertable<DownloadTask> {
     return <String, dynamic>{
       'id': serializer.toJson<String>(id),
       'trackId': serializer.toJson<String?>(trackId),
+      'playlistId': serializer.toJson<String?>(playlistId),
       'url': serializer.toJson<String>(url),
       'title': serializer.toJson<String>(title),
       'artist': serializer.toJson<String>(artist),
@@ -3753,6 +3784,7 @@ class DownloadTask extends DataClass implements Insertable<DownloadTask> {
   DownloadTask copyWith(
           {String? id,
           Value<String?> trackId = const Value.absent(),
+          Value<String?> playlistId = const Value.absent(),
           String? url,
           String? title,
           String? artist,
@@ -3771,6 +3803,7 @@ class DownloadTask extends DataClass implements Insertable<DownloadTask> {
       DownloadTask(
         id: id ?? this.id,
         trackId: trackId.present ? trackId.value : this.trackId,
+        playlistId: playlistId.present ? playlistId.value : this.playlistId,
         url: url ?? this.url,
         title: title ?? this.title,
         artist: artist ?? this.artist,
@@ -3792,6 +3825,8 @@ class DownloadTask extends DataClass implements Insertable<DownloadTask> {
     return DownloadTask(
       id: data.id.present ? data.id.value : this.id,
       trackId: data.trackId.present ? data.trackId.value : this.trackId,
+      playlistId:
+          data.playlistId.present ? data.playlistId.value : this.playlistId,
       url: data.url.present ? data.url.value : this.url,
       title: data.title.present ? data.title.value : this.title,
       artist: data.artist.present ? data.artist.value : this.artist,
@@ -3817,6 +3852,7 @@ class DownloadTask extends DataClass implements Insertable<DownloadTask> {
     return (StringBuffer('DownloadTask(')
           ..write('id: $id, ')
           ..write('trackId: $trackId, ')
+          ..write('playlistId: $playlistId, ')
           ..write('url: $url, ')
           ..write('title: $title, ')
           ..write('artist: $artist, ')
@@ -3840,6 +3876,7 @@ class DownloadTask extends DataClass implements Insertable<DownloadTask> {
   int get hashCode => Object.hash(
       id,
       trackId,
+      playlistId,
       url,
       title,
       artist,
@@ -3861,6 +3898,7 @@ class DownloadTask extends DataClass implements Insertable<DownloadTask> {
       (other is DownloadTask &&
           other.id == this.id &&
           other.trackId == this.trackId &&
+          other.playlistId == this.playlistId &&
           other.url == this.url &&
           other.title == this.title &&
           other.artist == this.artist &&
@@ -3881,6 +3919,7 @@ class DownloadTask extends DataClass implements Insertable<DownloadTask> {
 class DownloadTasksCompanion extends UpdateCompanion<DownloadTask> {
   final Value<String> id;
   final Value<String?> trackId;
+  final Value<String?> playlistId;
   final Value<String> url;
   final Value<String> title;
   final Value<String> artist;
@@ -3900,6 +3939,7 @@ class DownloadTasksCompanion extends UpdateCompanion<DownloadTask> {
   const DownloadTasksCompanion({
     this.id = const Value.absent(),
     this.trackId = const Value.absent(),
+    this.playlistId = const Value.absent(),
     this.url = const Value.absent(),
     this.title = const Value.absent(),
     this.artist = const Value.absent(),
@@ -3920,6 +3960,7 @@ class DownloadTasksCompanion extends UpdateCompanion<DownloadTask> {
   DownloadTasksCompanion.insert({
     required String id,
     this.trackId = const Value.absent(),
+    this.playlistId = const Value.absent(),
     required String url,
     required String title,
     this.artist = const Value.absent(),
@@ -3944,6 +3985,7 @@ class DownloadTasksCompanion extends UpdateCompanion<DownloadTask> {
   static Insertable<DownloadTask> custom({
     Expression<String>? id,
     Expression<String>? trackId,
+    Expression<String>? playlistId,
     Expression<String>? url,
     Expression<String>? title,
     Expression<String>? artist,
@@ -3964,6 +4006,7 @@ class DownloadTasksCompanion extends UpdateCompanion<DownloadTask> {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (trackId != null) 'track_id': trackId,
+      if (playlistId != null) 'playlist_id': playlistId,
       if (url != null) 'url': url,
       if (title != null) 'title': title,
       if (artist != null) 'artist': artist,
@@ -3986,6 +4029,7 @@ class DownloadTasksCompanion extends UpdateCompanion<DownloadTask> {
   DownloadTasksCompanion copyWith(
       {Value<String>? id,
       Value<String?>? trackId,
+      Value<String?>? playlistId,
       Value<String>? url,
       Value<String>? title,
       Value<String>? artist,
@@ -4005,6 +4049,7 @@ class DownloadTasksCompanion extends UpdateCompanion<DownloadTask> {
     return DownloadTasksCompanion(
       id: id ?? this.id,
       trackId: trackId ?? this.trackId,
+      playlistId: playlistId ?? this.playlistId,
       url: url ?? this.url,
       title: title ?? this.title,
       artist: artist ?? this.artist,
@@ -4032,6 +4077,9 @@ class DownloadTasksCompanion extends UpdateCompanion<DownloadTask> {
     }
     if (trackId.present) {
       map['track_id'] = Variable<String>(trackId.value);
+    }
+    if (playlistId.present) {
+      map['playlist_id'] = Variable<String>(playlistId.value);
     }
     if (url.present) {
       map['url'] = Variable<String>(url.value);
@@ -4090,6 +4138,7 @@ class DownloadTasksCompanion extends UpdateCompanion<DownloadTask> {
     return (StringBuffer('DownloadTasksCompanion(')
           ..write('id: $id, ')
           ..write('trackId: $trackId, ')
+          ..write('playlistId: $playlistId, ')
           ..write('url: $url, ')
           ..write('title: $title, ')
           ..write('artist: $artist, ')
@@ -4841,6 +4890,13 @@ abstract class _$AppDatabase extends GeneratedDatabase {
                 limitUpdateKind: UpdateKind.delete),
             result: [
               TableUpdate('download_tasks', kind: UpdateKind.delete),
+            ],
+          ),
+          WritePropagation(
+            on: TableUpdateQuery.onTableName('playlists',
+                limitUpdateKind: UpdateKind.delete),
+            result: [
+              TableUpdate('download_tasks', kind: UpdateKind.update),
             ],
           ),
         ],
@@ -6574,6 +6630,20 @@ final class $$PlaylistsTableReferences
     return ProcessedTableManager(
         manager.$state.copyWith(prefetchedData: cache));
   }
+
+  static MultiTypedResultKey<$DownloadTasksTable, List<DownloadTask>>
+      _downloadTasksRefsTable(_$AppDatabase db) =>
+          MultiTypedResultKey.fromTable(db.downloadTasks,
+              aliasName: 'playlists__id__download_tasks__playlist_id');
+
+  $$DownloadTasksTableProcessedTableManager get downloadTasksRefs {
+    final manager = $$DownloadTasksTableTableManager($_db, $_db.downloadTasks)
+        .filter((f) => f.playlistId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(_downloadTasksRefsTable($_db));
+    return ProcessedTableManager(
+        manager.$state.copyWith(prefetchedData: cache));
+  }
 }
 
 class $$PlaylistsTableFilterComposer
@@ -6613,6 +6683,27 @@ class $$PlaylistsTableFilterComposer
             $$PlaylistTracksTableFilterComposer(
               $db: $db,
               $table: $db.playlistTracks,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return f(composer);
+  }
+
+  Expression<bool> downloadTasksRefs(
+      Expression<bool> Function($$DownloadTasksTableFilterComposer f) f) {
+    final $$DownloadTasksTableFilterComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.id,
+        referencedTable: $db.downloadTasks,
+        getReferencedColumn: (t) => t.playlistId,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$DownloadTasksTableFilterComposer(
+              $db: $db,
+              $table: $db.downloadTasks,
               $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
               joinBuilder: joinBuilder,
               $removeJoinBuilderFromRootComposer:
@@ -6691,6 +6782,27 @@ class $$PlaylistsTableAnnotationComposer
             ));
     return f(composer);
   }
+
+  Expression<T> downloadTasksRefs<T extends Object>(
+      Expression<T> Function($$DownloadTasksTableAnnotationComposer a) f) {
+    final $$DownloadTasksTableAnnotationComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.id,
+        referencedTable: $db.downloadTasks,
+        getReferencedColumn: (t) => t.playlistId,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$DownloadTasksTableAnnotationComposer(
+              $db: $db,
+              $table: $db.downloadTasks,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return f(composer);
+  }
 }
 
 class $$PlaylistsTableTableManager extends RootTableManager<
@@ -6704,7 +6816,7 @@ class $$PlaylistsTableTableManager extends RootTableManager<
     $$PlaylistsTableUpdateCompanionBuilder,
     (Playlist, $$PlaylistsTableReferences),
     Playlist,
-    PrefetchHooks Function({bool playlistTracksRefs})> {
+    PrefetchHooks Function({bool playlistTracksRefs, bool downloadTasksRefs})> {
   $$PlaylistsTableTableManager(_$AppDatabase db, $PlaylistsTable table)
       : super(TableManagerState(
           db: db,
@@ -6753,11 +6865,13 @@ class $$PlaylistsTableTableManager extends RootTableManager<
                     $$PlaylistsTableReferences(db, table, e)
                   ))
               .toList(),
-          prefetchHooksCallback: ({playlistTracksRefs = false}) {
+          prefetchHooksCallback: (
+              {playlistTracksRefs = false, downloadTasksRefs = false}) {
             return PrefetchHooks(
               db: db,
               explicitlyWatchedTables: [
-                if (playlistTracksRefs) db.playlistTracks
+                if (playlistTracksRefs) db.playlistTracks,
+                if (downloadTasksRefs) db.downloadTasks
               ],
               addJoins: null,
               getPrefetchedDataCallback: (items) async {
@@ -6774,6 +6888,18 @@ class $$PlaylistsTableTableManager extends RootTableManager<
                         managerFromTypedResult: (p0) =>
                             $$PlaylistsTableReferences(db, table, p0)
                                 .playlistTracksRefs,
+                        currentColumn: 'id',
+                        referencedColumn: 'playlist_id',
+                        typedResults: items),
+                  if (downloadTasksRefs)
+                    await $_getPrefetchedDataByColumns<Playlist,
+                            $PlaylistsTable, DownloadTask, $DownloadTasksTable>(
+                        currentTable: table,
+                        referencedTable: $$PlaylistsTableReferences
+                            ._downloadTasksRefsTable(db),
+                        managerFromTypedResult: (p0) =>
+                            $$PlaylistsTableReferences(db, table, p0)
+                                .downloadTasksRefs,
                         currentColumn: 'id',
                         referencedColumn: 'playlist_id',
                         typedResults: items)
@@ -6795,7 +6921,7 @@ typedef $$PlaylistsTableProcessedTableManager = ProcessedTableManager<
     $$PlaylistsTableUpdateCompanionBuilder,
     (Playlist, $$PlaylistsTableReferences),
     Playlist,
-    PrefetchHooks Function({bool playlistTracksRefs})>;
+    PrefetchHooks Function({bool playlistTracksRefs, bool downloadTasksRefs})>;
 typedef $$PlaylistTracksTableCreateCompanionBuilder = PlaylistTracksCompanion
     Function({
   required String playlistId,
@@ -7604,6 +7730,7 @@ typedef $$DownloadTasksTableCreateCompanionBuilder = DownloadTasksCompanion
     Function({
   required String id,
   Value<String?> trackId,
+  Value<String?> playlistId,
   required String url,
   required String title,
   Value<String> artist,
@@ -7625,6 +7752,7 @@ typedef $$DownloadTasksTableUpdateCompanionBuilder = DownloadTasksCompanion
     Function({
   Value<String> id,
   Value<String?> trackId,
+  Value<String?> playlistId,
   Value<String> url,
   Value<String> title,
   Value<String> artist,
@@ -7657,6 +7785,20 @@ final class $$DownloadTasksTableReferences
     final manager = $$TracksTableTableManager($_db, $_db.tracks)
         .filter((f) => f.id.sqlEquals($_column));
     final item = $_typedResult.readTableOrNull(_trackIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+        manager.$state.copyWith(prefetchedData: [item]));
+  }
+
+  static $PlaylistsTable _playlistIdTable(_$AppDatabase db) =>
+      db.playlists.createAlias('download_tasks__playlist_id__playlists__id');
+
+  $$PlaylistsTableProcessedTableManager? get playlistId {
+    final $_column = $_itemColumn<String>('playlist_id');
+    if ($_column == null) return null;
+    final manager = $$PlaylistsTableTableManager($_db, $_db.playlists)
+        .filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_playlistIdTable($_db));
     if (item == null) return manager;
     return ProcessedTableManager(
         manager.$state.copyWith(prefetchedData: [item]));
@@ -7734,6 +7876,26 @@ class $$DownloadTasksTableFilterComposer
             $$TracksTableFilterComposer(
               $db: $db,
               $table: $db.tracks,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return composer;
+  }
+
+  $$PlaylistsTableFilterComposer get playlistId {
+    final $$PlaylistsTableFilterComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.playlistId,
+        referencedTable: $db.playlists,
+        getReferencedColumn: (t) => t.id,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$PlaylistsTableFilterComposer(
+              $db: $db,
+              $table: $db.playlists,
               $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
               joinBuilder: joinBuilder,
               $removeJoinBuilderFromRootComposer:
@@ -7820,6 +7982,26 @@ class $$DownloadTasksTableOrderingComposer
             ));
     return composer;
   }
+
+  $$PlaylistsTableOrderingComposer get playlistId {
+    final $$PlaylistsTableOrderingComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.playlistId,
+        referencedTable: $db.playlists,
+        getReferencedColumn: (t) => t.id,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$PlaylistsTableOrderingComposer(
+              $db: $db,
+              $table: $db.playlists,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return composer;
+  }
 }
 
 class $$DownloadTasksTableAnnotationComposer
@@ -7898,6 +8080,26 @@ class $$DownloadTasksTableAnnotationComposer
             ));
     return composer;
   }
+
+  $$PlaylistsTableAnnotationComposer get playlistId {
+    final $$PlaylistsTableAnnotationComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.playlistId,
+        referencedTable: $db.playlists,
+        getReferencedColumn: (t) => t.id,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$PlaylistsTableAnnotationComposer(
+              $db: $db,
+              $table: $db.playlists,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return composer;
+  }
 }
 
 class $$DownloadTasksTableTableManager extends RootTableManager<
@@ -7911,7 +8113,7 @@ class $$DownloadTasksTableTableManager extends RootTableManager<
     $$DownloadTasksTableUpdateCompanionBuilder,
     (DownloadTask, $$DownloadTasksTableReferences),
     DownloadTask,
-    PrefetchHooks Function({bool trackId})> {
+    PrefetchHooks Function({bool trackId, bool playlistId})> {
   $$DownloadTasksTableTableManager(_$AppDatabase db, $DownloadTasksTable table)
       : super(TableManagerState(
           db: db,
@@ -7925,6 +8127,7 @@ class $$DownloadTasksTableTableManager extends RootTableManager<
           updateCompanionCallback: ({
             Value<String> id = const Value.absent(),
             Value<String?> trackId = const Value.absent(),
+            Value<String?> playlistId = const Value.absent(),
             Value<String> url = const Value.absent(),
             Value<String> title = const Value.absent(),
             Value<String> artist = const Value.absent(),
@@ -7945,6 +8148,7 @@ class $$DownloadTasksTableTableManager extends RootTableManager<
               DownloadTasksCompanion(
             id: id,
             trackId: trackId,
+            playlistId: playlistId,
             url: url,
             title: title,
             artist: artist,
@@ -7965,6 +8169,7 @@ class $$DownloadTasksTableTableManager extends RootTableManager<
           createCompanionCallback: ({
             required String id,
             Value<String?> trackId = const Value.absent(),
+            Value<String?> playlistId = const Value.absent(),
             required String url,
             required String title,
             Value<String> artist = const Value.absent(),
@@ -7985,6 +8190,7 @@ class $$DownloadTasksTableTableManager extends RootTableManager<
               DownloadTasksCompanion.insert(
             id: id,
             trackId: trackId,
+            playlistId: playlistId,
             url: url,
             title: title,
             artist: artist,
@@ -8008,7 +8214,7 @@ class $$DownloadTasksTableTableManager extends RootTableManager<
                     $$DownloadTasksTableReferences(db, table, e)
                   ))
               .toList(),
-          prefetchHooksCallback: ({trackId = false}) {
+          prefetchHooksCallback: ({trackId = false, playlistId = false}) {
             return PrefetchHooks(
               db: db,
               explicitlyWatchedTables: [],
@@ -8035,6 +8241,16 @@ class $$DownloadTasksTableTableManager extends RootTableManager<
                         $$DownloadTasksTableReferences._trackIdTable(db).id,
                   ) as T;
                 }
+                if (playlistId) {
+                  state = state.withJoin(
+                    currentTable: table,
+                    currentColumn: table.playlistId,
+                    referencedTable:
+                        $$DownloadTasksTableReferences._playlistIdTable(db),
+                    referencedColumn:
+                        $$DownloadTasksTableReferences._playlistIdTable(db).id,
+                  ) as T;
+                }
 
                 return state;
               },
@@ -8057,7 +8273,7 @@ typedef $$DownloadTasksTableProcessedTableManager = ProcessedTableManager<
     $$DownloadTasksTableUpdateCompanionBuilder,
     (DownloadTask, $$DownloadTasksTableReferences),
     DownloadTask,
-    PrefetchHooks Function({bool trackId})>;
+    PrefetchHooks Function({bool trackId, bool playlistId})>;
 typedef $$AppSettingsTableCreateCompanionBuilder = AppSettingsCompanion
     Function({
   required String key,

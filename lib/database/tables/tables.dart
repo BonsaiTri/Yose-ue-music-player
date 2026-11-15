@@ -165,6 +165,12 @@ class DownloadTasks extends Table {
   /// Associated library track once registered (nullable while downloading).
   TextColumn get trackId =>
       text().nullable().named('track_id').references(Tracks, #id, onDelete: KeyAction.cascade)();
+  /// Owning playlist when the task came from a playlist download. Deleting
+  /// the playlist keeps the task (and its track) — the link just goes away.
+  TextColumn get playlistId =>
+      text().nullable()
+          .named('playlist_id')
+          .references(Playlists, #id, onDelete: KeyAction.setNull)();
   TextColumn get url => text().named('url')();
   TextColumn get title => text().named('title')();
   TextColumn get artist =>

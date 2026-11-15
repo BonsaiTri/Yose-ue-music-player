@@ -9,6 +9,7 @@ import 'package:music_player/core/logging/app_logger.dart';
 import 'package:music_player/core/services/file_service.dart';
 import 'package:music_player/database/database.dart';
 import 'package:music_player/database/repositories/download_repository.dart';
+import 'package:music_player/database/repositories/playlist_settings_history_repository.dart';
 import 'package:music_player/features/media_import/domain/import_service.dart';
 import 'package:music_player/features/downloader/domain/yt_dlp.dart';
 import 'package:music_player/features/downloader/domain/youtube_resolver.dart';
@@ -106,6 +107,7 @@ class DownloadEngine {
     required this.importer,
     this.concurrency = AppConstants.maxConcurrentDownloads,
     this.ytDlp,
+    this.playlists,
   });
 
   final DownloadRepository downloads;
@@ -116,6 +118,11 @@ class DownloadEngine {
   /// yt-dlp backend for YouTube sources (created by bootstrap; injected in
   /// tests). YouTube downloads throw a clear error when this is absent.
   final YtDlpBackend? ytDlp;
+
+  /// When present, playlist downloads (M3U/M3U8 or YouTube playlists) are
+  /// grouped into an app playlist named after the source, and finished
+  /// tracks are added to it automatically.
+  final PlaylistRepository? playlists;
 
   static const _pollInterval = Duration(seconds: 2);
   static const _progressFlush = Duration(milliseconds: 500);
@@ -210,7 +217,9 @@ class DownloadEngine {
 
   /// Enqueues every track in an M3U/M3U8 playlist at [url] as individual
   /// download tasks. Relative URLs are resolved against the playlist URL;
-  /// nested playlists are skipped. Returns the queue summary.
+  /// nested playlists are skipped. The tracks are grouped into an app
+  /// playlist named after the source (`#PLAYLIST:` directive, else the
+  /// file name) and joined to it as they finish. Returns the queue summary.
   Future<PlaylistQueueSummary> queuePlaylist(String url) async {
     _validateUrl(url);
     final uri = Uri.tryParse(url);
@@ -222,6 +231,8 @@ class DownloadEngine {
     if (entries.isEmpty) {
       throw const DownloadTaskException('No playable tracks found in playlist');
     }
+    final playlistId =
+        await _resolveOrCreatePlaylist(_m3uPlaylistName(body, uri));
     var queued = 0;
     var ignored = 0;
     var already = 0;
@@ -236,7 +247,11 @@ class DownloadEngine {
         continue;
       }
       try {
-        await downloads.create(url: entry.url, title: entry.title, artist: entry.artist);
+        await downloads.create(
+            url: entry.url,
+            title: entry.title,
+            artist: entry.artist,
+            playlistId: playlistId);
         queued++;
       } catch (_) {
         ignored++;
@@ -258,8 +273,13 @@ class DownloadEngine {
   ///   downloaded via yt-dlp at execution time (stream URLs and PO tokens
   ///   expire, so nothing is pre-resolved).
   /// * Playlist: every track becomes a task with its watch URL; titles come
-  ///   from a flat yt-dlp listing (no per-track network cost).
-  Future<PlaylistQueueSummary> queueYouTube(String url) async {
+  ///   from a flat yt-dlp listing (no per-track network cost). The tracks
+  ///   are grouped into an app playlist named after the source playlist and
+  ///   joined to it as they finish.
+  Future<PlaylistQueueSummary> queueYouTube(
+    String url, {
+    String? playlistName,
+  }) async {
     _validateUrl(url);
     if (!YouTubeResolver.isYouTubeUrl(url)) {
       throw const DownloadTaskException('Not a YouTube URL');
@@ -269,6 +289,7 @@ class DownloadEngine {
       throw const DownloadTaskException(
           'YouTube downloading is not available on this platform');
     }
+    final playlistId = await _playlistIdForYouTube(url, playlistName);
     try {
       final entries = await backend.list(url);
       if (entries.isEmpty) {
@@ -292,6 +313,7 @@ class DownloadEngine {
             url: entry.watchUrl,
             title: entry.title,
             artist: entry.channel ?? 'Unknown Artist',
+            playlistId: playlistId,
           );
           queued++;
         } catch (_) {
@@ -311,6 +333,61 @@ class DownloadEngine {
     } on YtDlpException catch (e) {
       throw DownloadTaskException(e.message);
     }
+  }
+
+  /// Resolves (or creates) the app playlist a named playlist download
+  /// should land in, returning its id. A playlist with the same name is
+  /// reused so re-downloading the same source accumulates in one playlist.
+  Future<String?> _resolveOrCreatePlaylist(String name) async {
+    final repo = playlists;
+    if (repo == null) return null;
+    final n = name.trim();
+    if (n.isEmpty) return null;
+    final existing = await repo.byName(n);
+    final playlist = existing ?? await repo.create(n);
+    AppLogger.info(
+        'Playlist download → “${playlist.name}” (${existing == null ? 'created' : 'reused'})',
+        tag: 'download');
+    return playlist.id;
+  }
+
+  /// Playlist id for a YouTube [url]: null for single videos, otherwise the
+  /// playlist named after the source. The name comes from [playlistName]
+  /// when given, else from a cheap yt-dlp metadata fetch.
+  Future<String?> _playlistIdForYouTube(String url, String? requestedName) async {
+    if (!_isYouTubePlaylistUrl(url) || playlists == null || ytDlp == null) {
+      return null;
+    }
+    String name = requestedName?.trim() ?? '';
+    if (name.isEmpty) {
+      name = (await ytDlp!.playlistTitle(url))?.trim() ?? '';
+    }
+    if (name.isEmpty) name = 'YouTube playlist';
+    return _resolveOrCreatePlaylist(name);
+  }
+
+  /// True for YouTube playlist/mix URLs (list/mix query param or path).
+  static bool _isYouTubePlaylistUrl(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return false;
+    if (uri.queryParameters.containsKey('list')) return true;
+    final path = uri.path;
+    return path.contains('/playlist') || path.contains('/mix');
+  }
+
+  /// Display name of an M3U playlist: the `#PLAYLIST:` directive when
+  /// present, otherwise the file name (percent-decoded).
+  String _m3uPlaylistName(String body, Uri uri) {
+    for (final raw in body.split(RegExp(r'\r?\n'))) {
+      final m = RegExp(r'^#PLAYLIST:\s*(.+)$', caseSensitive: false)
+          .firstMatch(raw.trim());
+      if (m != null) {
+        final name = (m.group(1) ?? '').trim();
+        if (name.isNotEmpty) return name;
+      }
+    }
+    final name = _titleFromUrl(uri);
+    return name.isEmpty ? 'Imported playlist' : name;
   }
 
   /// Searches YouTube and returns up to [maxResults] matches (title,
@@ -567,6 +644,17 @@ class DownloadEngine {
       );
       if (track == null) {
         throw DownloadTaskException('Downloaded file is not a recognized audio format');
+      }
+
+      // Playlist downloads: join the finished track to its playlist.
+      // Best-effort — a hiccup here never fails an otherwise-complete file.
+      final owningPlaylistId = task.playlistId;
+      if (owningPlaylistId != null && playlists != null) {
+        try {
+          await playlists!.addTracks(owningPlaylistId, [track.id]);
+        } catch (e) {
+          AppLogger.warning('Could not add track to playlist: $e', tag: 'download');
+        }
       }
 
       // VALIDATING: existence, size integrity.

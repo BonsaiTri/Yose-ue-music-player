@@ -21,6 +21,7 @@ import java.io.FileOutputStream
  * Methods:
  *  - init      : one-time extraction of the runtime (backgrounded)
  *  - list      : flat JSON listing of a video or playlist (--dump-json)
+ *  - title     : playlist title only (--print playlist_title)
  *  - download  : download best audio for a URL into a work directory
  *  - cancel    : kill an in-flight download process
  *
@@ -155,6 +156,29 @@ class YoutubeDlPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                         result.error("cancelled", "download cancelled", null)
                     } catch (t: Throwable) {
                         Log.e(TAG, "yt-dlp download failed", t)
+                        result.error("ytdlp_failed", describe(t), null)
+                    }
+                }.start()
+            }
+
+            "title" -> {
+                val url = call.argument<String>("url")
+                if (url == null) {
+                    result.error("bad_args", "url is required", null)
+                    return
+                }
+                Thread {
+                    try {
+                        // Cheap metadata-only fetch: prints the playlist title
+                        // (once per entry); Dart takes the first line.
+                        val request = YoutubeDLRequest(url)
+                            .addOption("--flat-playlist")
+                            .addOption("--print", "playlist_title")
+                            .addOption("--ignore-errors")
+                        val response = YoutubeDL.execute(request, null, null)
+                        result.success(response.out)
+                    } catch (t: Throwable) {
+                        Log.e(TAG, "yt-dlp title failed", t)
                         result.error("ytdlp_failed", describe(t), null)
                     }
                 }.start()

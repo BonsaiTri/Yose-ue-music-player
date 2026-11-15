@@ -19,6 +19,7 @@ import 'package:music_player/core/services/metadata_service.dart';
 import 'package:music_player/database/database.dart';
 import 'package:music_player/database/repositories/download_repository.dart';
 import 'package:music_player/database/repositories/library_repository.dart';
+import 'package:music_player/database/repositories/playlist_settings_history_repository.dart';
 import 'package:music_player/features/downloader/domain/download_engine.dart';
 import 'package:music_player/features/downloader/domain/yt_dlp.dart';
 import 'package:music_player/features/downloader/domain/youtube_resolver.dart';
@@ -327,6 +328,183 @@ http://127.0.0.1:$port/c.wav
     for (final t in finished) {
       expect(File(t.finalPath!).existsSync(), isTrue);
       expect(t.trackId, isNotNull);
+    }
+  });
+
+  test('M3U8 playlist creates a named app playlist and joins tracks as they finish',
+      () async {
+    final wav = _wavBytes();
+    final playlist = '''
+#EXTM3U
+#PLAYLIST:My Test Mix
+#EXTINF:10,Artist A - Track One
+/a.wav
+#EXTINF:10,Track Two
+/b.wav
+''';
+    routeBytes = {
+      '/playlist.m3u8': utf8.encode(playlist),
+      '/a.wav': wav,
+      '/b.wav': wav,
+    };
+    final playlists = PlaylistRepository(db);
+    final engine = DownloadEngine(
+        downloads: downloads,
+        files: files,
+        importer: importer,
+        playlists: playlists);
+    try {
+      final summary =
+          await engine.queuePlaylist('http://127.0.0.1:$port/playlist.m3u8');
+      expect(summary.queued, 2);
+      // The source name (from #PLAYLIST:) becomes an app playlist and the
+      // tasks are owned by it.
+      final created = await playlists.byName('My Test Mix');
+      expect(created, isNotNull);
+      final queued = await downloads.queued(limit: 10);
+      expect(queued.map((t) => t.playlistId),
+          [created!.id, created.id]);
+      await engine.start();
+      final deadline = DateTime.now().add(const Duration(seconds: 60));
+      var finishedCount = 0;
+      do {
+        final history = await downloads.history(limit: 50);
+        finishedCount = history
+            .where((t) => t.status == DownloadTaskStatus.completed)
+            .length;
+        if (finishedCount >= 2 || !DateTime.now().isBefore(deadline)) break;
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      } while (finishedCount < 2);
+      expect(finishedCount, 2);
+      // Finished tracks were added to the playlist.
+      expect(await playlists.tracks(created.id), hasLength(2));
+      expect(await playlists.trackCount(created.id), 2);
+    } finally {
+      await engine.stop();
+    }
+  });
+
+  test('M3U8 playlist without a name falls back to the file name', () async {
+    final wav = _wavBytes();
+    routeBytes = {
+      '/summer%20mix.m3u8':
+          utf8.encode('#EXTM3U\n#EXTINF:10,Song\n/song.wav'),
+      '/song.wav': wav,
+    };
+    final playlists = PlaylistRepository(db);
+    final engine = DownloadEngine(
+        downloads: downloads,
+        files: files,
+        importer: importer,
+        playlists: playlists);
+    try {
+      await engine
+          .queuePlaylist('http://127.0.0.1:$port/summer%20mix.m3u8');
+      expect(await playlists.byName('summer mix'), isNotNull);
+    } finally {
+      await engine.stop();
+    }
+  });
+
+  test('re-downloading a named playlist reuses the existing playlist',
+      () async {
+    final wav = _wavBytes();
+    routeBytes = {
+      '/playlist.m3u8': utf8.encode(
+          '#EXTM3U\n#PLAYLIST:My Test Mix\n#EXTINF:10,Song\n/a.wav'),
+      '/a.wav': wav,
+    };
+    final playlists = PlaylistRepository(db);
+    final existing = await playlists.create('My Test Mix');
+    final engine = DownloadEngine(
+        downloads: downloads,
+        files: files,
+        importer: importer,
+        playlists: playlists);
+    try {
+      await engine
+          .queuePlaylist('http://127.0.0.1:$port/playlist.m3u8');
+      final reused = await playlists.byName('My Test Mix');
+      expect(reused!.id, existing.id, reason: 'must reuse, not duplicate');
+      expect(await playlists.all(), hasLength(1));
+      final queued = await downloads.queued(limit: 10);
+      expect(queued.single.playlistId, existing.id);
+    } finally {
+      await engine.stop();
+    }
+  });
+
+  test('YouTube playlist URL creates an app playlist named after the source',
+      () async {
+    const pl = 'PL8_b2d0WTcErfeETzJGV88mOOkHvAdQoL';
+    final fake = _FakeYtDlp(
+        entries: const [
+          YtDlpEntry(id: 'aaaaaaaaaaa', title: 'First Song', channel: 'A'),
+          YtDlpEntry(id: 'bbbbbbbbbbb', title: 'Second Song', channel: 'B'),
+        ],
+        titleResult: 'Work');
+    final playlists = PlaylistRepository(db);
+    final engine = DownloadEngine(
+        downloads: downloads,
+        files: files,
+        importer: importer,
+        ytDlp: fake,
+        playlists: playlists);
+    try {
+      final summary =
+          await engine.queueYouTube('https://www.youtube.com/playlist?list=$pl');
+      expect(summary.queued, 2);
+      final created = await playlists.byName('Work');
+      expect(created, isNotNull);
+      final queued = await downloads.queued(limit: 10);
+      expect(queued.map((t) => t.playlistId), [created!.id, created.id]);
+    } finally {
+      await engine.stop();
+    }
+  });
+
+  test('single YouTube video download does not create a playlist', () async {
+    final fake = _FakeYtDlp(
+        entries: const [
+          YtDlpEntry(id: 'fBgKxsvl6M8', title: 'Song', channel: 'C'),
+        ]);
+    final playlists = PlaylistRepository(db);
+    final engine = DownloadEngine(
+        downloads: downloads,
+        files: files,
+        importer: importer,
+        ytDlp: fake,
+        playlists: playlists);
+    try {
+      final summary =
+          await engine.queueYouTube('https://www.youtube.com/watch?v=fBgKxsvl6M8');
+      expect(summary.queued, 1);
+      expect(await playlists.all(), isEmpty);
+      final queued = await downloads.queued(limit: 10);
+      expect(queued.single.playlistId, isNull);
+    } finally {
+      await engine.stop();
+    }
+  });
+
+  test('YouTube playlist with an unknown title falls back to a default name',
+      () async {
+    const pl = 'PL8_b2d0WTcErfeETzJGV88mOOkHvAdQoL';
+    final fake = _FakeYtDlp(entries: const [
+      YtDlpEntry(id: 'aaaaaaaaaaa', title: 'First Song', channel: 'A'),
+    ]); // titleResult: null
+    final playlists = PlaylistRepository(db);
+    final engine = DownloadEngine(
+        downloads: downloads,
+        files: files,
+        importer: importer,
+        ytDlp: fake,
+        playlists: playlists);
+    try {
+      await engine.queueYouTube('https://www.youtube.com/playlist?list=$pl');
+      expect(await playlists.byName('YouTube playlist'), isNotNull);
+    } finally {
+      await engine.stop();
     }
   });
 
@@ -799,11 +977,13 @@ http://127.0.0.1:$port/c.wav
 
 /// Fake yt-dlp backend for engine tests: no network, deterministic output.
 class _FakeYtDlp implements YtDlpBackend {
-  _FakeYtDlp({this.entries, this.errorMessage, this.fileBytes});
+  _FakeYtDlp(
+      {this.entries, this.errorMessage, this.fileBytes, this.titleResult});
 
   final List<YtDlpEntry>? entries;
   final String? errorMessage;
   final List<int>? fileBytes;
+  final String? titleResult;
   final calls = <String>[];
 
   @override
@@ -814,6 +994,12 @@ class _FakeYtDlp implements YtDlpBackend {
     calls.add('list $url');
     if (errorMessage != null) throw YtDlpException(errorMessage!);
     return entries ?? const [];
+  }
+
+  @override
+  Future<String?> playlistTitle(String url) async {
+    calls.add('title $url');
+    return titleResult;
   }
 
   @override

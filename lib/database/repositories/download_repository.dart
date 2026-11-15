@@ -81,12 +81,14 @@ class DownloadRepository {
     String album = 'Unknown Album',
     String? sourceId,
     String? trackId,
+    String? playlistId,
     int priority = 0,
   }) async {
     final now = DateTime.now();
     final task = DownloadTask(
       id: _uuid.v4(),
       trackId: trackId,
+      playlistId: playlistId,
       url: url,
       title: title,
       artist: artist,

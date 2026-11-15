@@ -255,12 +255,14 @@ Future<ProviderContainer> bootstrap() async {
   // YouTube downloads run through yt-dlp (bundled on Android, pinned
   // official binary on desktop). Setup is lazy: first YouTube action.
   final ytDlp = createYtDlpBackend(appRoot: root);
+  final playlists = PlaylistRepository(db);
   final downloader = DownloadEngine(
     downloads: downloads,
     files: files,
     importer: importer,
     concurrency: maxConcurrent,
     ytDlp: ytDlp,
+    playlists: playlists,
   );
   await downloader.start();
 
@@ -272,7 +274,7 @@ Future<ProviderContainer> bootstrap() async {
     artists: artists,
     albums: albums,
     genres: genres,
-    playlists: PlaylistRepository(db),
+    playlists: playlists,
     settings: settings,
     history: HistoryRepository(db),
     downloads: downloads,

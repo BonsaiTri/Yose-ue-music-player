@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.9 (2026-11-15)
+
+### Added
+- **Downloads build playlists.** Downloading a playlist (YouTube playlist
+  or M3U/M3U8 link) now creates a **playlist in the app named after the
+  source** — and every track that finishes downloading is added to it
+  automatically. Re-downloading the same source reuses the existing
+  playlist instead of creating a duplicate. Single-video downloads are
+  unaffected.
+- **Shuffle play for playlists.**
+  - **Playlists tab:** long-press a playlist → **Shuffle play**.
+  - **Playlist detail:** a shuffle button next to Play all.
+- **New playlist from Home.** The Home screen has a **New playlist** button
+  next to Play all / Shuffle, so you can create a playlist without leaving
+  the hub.
+
 ## 0.3.8 (2026-11-15)
 
 ### Changed
