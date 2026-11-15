@@ -72,7 +72,7 @@ class _AppShellState extends ConsumerState<AppShell> {
   static const _primaryItems = [
     _NavItem('Home', Icons.home_outlined, Page.home),
     _NavItem('Library', Icons.library_music_outlined, Page.library),
-    _NavItem('Search', Icons.search_outlined, Page.search),
+    _NavItem('Playlists', Icons.playlist_play_outlined, Page.playlists),
     _NavItem('Downloads', Icons.download_outlined, Page.downloads),
     _NavItem('Settings', Icons.settings_outlined, Page.settings),
   ];

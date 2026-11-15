@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.8 (2026-11-15)
+
+### Changed
+- **Simpler navigation.** The bottom bar / sidebar now has five tabs:
+  **Home, Library, Playlists, Downloads, Settings**.
+  - **Library and Search are merged** — the Library screen has a Library
+    / Search tab switcher, so searching your music is one tap away from
+    browsing it.
+  - **Playlists is a primary tab** — all your playlists are visible without
+    going through Home first.
+
 ## 0.3.7 (2026-11-15)
 
 ### Added

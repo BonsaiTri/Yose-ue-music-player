@@ -8,17 +8,34 @@ import 'package:music_player/database/database.dart';
 import 'package:music_player/features/search/domain/search_provider.dart';
 import 'package:music_player/shared/widgets/track_list_tile.dart';
 
-/// Search with a pluggable source (spec §6.5): the local library by
-/// default, plus any external [MusicSourceProvider]s registered in
-/// [AppDependencies.sources].
-class SearchScreen extends ConsumerStatefulWidget {
+/// Standalone search screen (kept for deep navigation; the primary entry
+/// point is the Search tab inside Library).
+class SearchScreen extends ConsumerWidget {
   const SearchScreen({super.key});
 
   @override
-  ConsumerState<SearchScreen> createState() => _SearchScreenState();
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Search')),
+      body: const LibrarySearchBody(),
+    );
+  }
 }
 
-class _SearchScreenState extends ConsumerState<SearchScreen> {
+/// Search with a pluggable source (spec §6.5): the local library by
+/// default, plus any external [MusicSourceProvider]s registered in
+/// [AppDependencies.sources].
+///
+/// Reusable body: rendered as its own screen or embedded in the Library
+/// tab.
+class LibrarySearchBody extends ConsumerStatefulWidget {
+  const LibrarySearchBody({super.key});
+
+  @override
+  ConsumerState<LibrarySearchBody> createState() => _LibrarySearchBodyState();
+}
+
+class _LibrarySearchBodyState extends ConsumerState<LibrarySearchBody> {
   final _controller = TextEditingController();
   Timer? _debounce;
   String _sourceId = 'library';
@@ -119,108 +136,105 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   @override
   Widget build(BuildContext context) {
     final sources = ref.read(appDepsProvider).sources.providers;
-    return Scaffold(
-      appBar: AppBar(title: const Text('Search')),
-      body: Column(
-        children: [
-          // The source picker only appears when an external source is
-          // registered — with just the local library it is noise.
-          if (sources.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: DropdownButtonHideUnderline(
-                      child: ButtonTheme(
-                        height: 36,
-                        child: DropdownButton<String>(
-                          value: _sourceId,
-                          isExpanded: true,
-                          items: [
-                            const DropdownMenuItem(
-                                value: 'library', child: Text('Library')),
-                            for (final s in sources)
-                              DropdownMenuItem(value: s.id, child: Text(s.label)),
-                          ],
-                          onChanged: (v) {
-                            if (v == null) return;
-                            setState(() {
-                              _sourceId = v;
-                              _results = const [];
-                              _remoteResults = const [];
-                              _error = null;
-                            });
-                            if (_controller.text.trim().isNotEmpty) {
-                              _search(_controller.text);
-                            }
-                          },
-                        ),
+    return Column(
+      children: [
+        // The source picker only appears when an external source is
+        // registered — with just the local library it is noise.
+        if (sources.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonHideUnderline(
+                    child: ButtonTheme(
+                      height: 36,
+                      child: DropdownButton<String>(
+                        value: _sourceId,
+                        isExpanded: true,
+                        items: [
+                          const DropdownMenuItem(
+                              value: 'library', child: Text('Library')),
+                          for (final s in sources)
+                            DropdownMenuItem(value: s.id, child: Text(s.label)),
+                        ],
+                        onChanged: (v) {
+                          if (v == null) return;
+                          setState(() {
+                            _sourceId = v;
+                            _results = const [];
+                            _remoteResults = const [];
+                            _error = null;
+                          });
+                          if (_controller.text.trim().isNotEmpty) {
+                            _search(_controller.text);
+                          }
+                        },
                       ),
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
+          ),
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: TextField(
+            controller: _controller,
+            decoration: const InputDecoration(
+              hintText: 'Search title, artist, album, genre…',
+              prefixIcon: Icon(Icons.search),
+              border: OutlineInputBorder(),
+            ),
+            onChanged: _onChanged,
+          ),
+        ),
+        if (_error != null)
           Padding(
-            padding: const EdgeInsets.all(12),
-            child: TextField(
-              controller: _controller,
-              decoration: const InputDecoration(
-                hintText: 'Search title, artist, album, genre…',
-                prefixIcon: Icon(Icons.search),
-                border: OutlineInputBorder(),
-              ),
-              onChanged: _onChanged,
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text(_error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error)),
           ),
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Text(_error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error)),
-            ),
-          Expanded(
-            child: _searching
-                ? const Center(child: CircularProgressIndicator())
-                : _remoteSource != null
-                    ? _remoteResults.isEmpty
-                        ? Center(
-                            child: Text(sources.isEmpty
-                                ? 'No external sources are configured.'
-                                : 'No results from "${_remoteSource!.label}".'),
-                          )
-                        : ListView.builder(
-                            itemCount: _remoteResults.length,
-                            itemBuilder: (_, i) =>
-                                _RemoteResultTile(
-                                  result: _remoteResults[i],
-                                  onQueueDownload: _queueDownload,
-                                  inLibraryChecker: _inLibrary,
-                                ),
-                          )
-                    : _results.isEmpty
-                        ? const Center(child: Text('Type to search your library.'))
-                        : ListView.builder(
-                            itemCount: _results.length,
-                            itemBuilder: (_, i) => TrackListTile(
-                              track: _results[i],
-                              onTap: () => ref
-                                  .read(playerProvider)
-                                  .playQueue(_results, startIndex: i),
-                              onRemove: (deleteFile) async {
-                                await ref
-                                    .read(appDepsProvider)
-                                    .tracks
-                                    .removeTrack(_results[i].id,
-                                        deleteFile: deleteFile);
-                                await _search(_controller.text);
-                              },
-                            ),
+        Expanded(
+          child: _searching
+              ? const Center(child: CircularProgressIndicator())
+              : _remoteSource != null
+                  ? _remoteResults.isEmpty
+                      ? Center(
+                          child: Text(sources.isEmpty
+                              ? 'No external sources are configured.'
+                              : 'No results from "${_remoteSource!.label}".'),
+                        )
+                      : ListView.builder(
+                          itemCount: _remoteResults.length,
+                          itemBuilder: (_, i) =>
+                              _RemoteResultTile(
+                                result: _remoteResults[i],
+                                onQueueDownload: _queueDownload,
+                                inLibraryChecker: _inLibrary,
+                              ),
+                        )
+                  : _results.isEmpty
+                      ? const Center(child: Text('Type to search your library.'))
+                      : ListView.builder(
+                          itemCount: _results.length,
+                          itemBuilder: (_, i) => TrackListTile(
+                            track: _results[i],
+                            onTap: () => ref
+                                .read(playerProvider)
+                                .playQueue(_results, startIndex: i),
+                            onRemove: (deleteFile) async {
+                              await ref
+                                  .read(appDepsProvider)
+                                  .tracks
+                                  .removeTrack(_results[i].id,
+                                      deleteFile: deleteFile);
+                              await _search(_controller.text);
+                            },
                           ),
-          ),
-        ],
-      ),
+                        ),
+        ),
+      ],
     );
   }
 }

@@ -4,11 +4,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:music_player/app/bootstrap.dart';
 import 'package:music_player/database/database.dart';
 import 'package:music_player/features/media_import/presentation/import_picker.dart';
+import 'package:music_player/features/search/presentation/search_screen.dart';
 import 'package:music_player/shared/widgets/add_to_playlist_sheet.dart';
 import 'package:music_player/shared/widgets/empty_view.dart';
 import 'package:music_player/shared/widgets/track_list_tile.dart';
 
-/// All-songs view with sorting and drag-drop/file-picker import.
+/// Library + Search combined screen: the all-songs view (with sorting and
+/// drag-drop/file-picker import) and the library search, as two tabs.
 class LibraryScreen extends ConsumerStatefulWidget {
   const LibraryScreen({super.key});
 
@@ -16,8 +18,11 @@ class LibraryScreen extends ConsumerStatefulWidget {
   ConsumerState<LibraryScreen> createState() => _LibraryScreenState();
 }
 
-class _LibraryScreenState extends ConsumerState<LibraryScreen> {
+class _LibraryScreenState extends ConsumerState<LibraryScreen>
+    with SingleTickerProviderStateMixin {
   static const int _pageSize = 200;
+
+  late final TabController _tab;
 
   List<Track> _tracks = const [];
   String _order = 'date_added';
@@ -29,7 +34,14 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   @override
   void initState() {
     super.initState();
+    _tab = TabController(vsync: this, length: 2);
     _load();
+  }
+
+  @override
+  void dispose() {
+    _tab.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -83,24 +95,25 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
       appBar: AppBar(
         title: const Text('Library'),
         actions: [
-          DropdownButtonHideUnderline(
-            child: DropdownButton<String>(
-              value: _order,
-              items: const [
-                DropdownMenuItem(value: 'date_added', child: Text('Recently added')),
-                DropdownMenuItem(value: 'title', child: Text('Title')),
-                DropdownMenuItem(value: 'artist', child: Text('Artist')),
-                DropdownMenuItem(value: 'album', child: Text('Album')),
-                DropdownMenuItem(value: 'play_count', child: Text('Most played')),
-                DropdownMenuItem(value: 'duration', child: Text('Duration')),
-              ],
-              onChanged: (v) {
-                if (v == null) return;
-                setState(() => _order = v);
-                _load();
-              },
+          if (_tab.index == 0)
+            DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: _order,
+                items: const [
+                  DropdownMenuItem(value: 'date_added', child: Text('Recently added')),
+                  DropdownMenuItem(value: 'title', child: Text('Title')),
+                  DropdownMenuItem(value: 'artist', child: Text('Artist')),
+                  DropdownMenuItem(value: 'album', child: Text('Album')),
+                  DropdownMenuItem(value: 'play_count', child: Text('Most played')),
+                  DropdownMenuItem(value: 'duration', child: Text('Duration')),
+                ],
+                onChanged: (v) {
+                  if (v == null) return;
+                  setState(() => _order = v);
+                  _load();
+                },
+              ),
             ),
-          ),
           IconButton(
             icon: _importing
                 ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
@@ -110,7 +123,29 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
           ),
         ],
       ),
-      body: _loading && _tracks.isEmpty
+      body: Column(
+        children: [
+          TabBar(
+            controller: _tab,
+            tabs: const [
+              Tab(icon: Icon(Icons.library_music), text: 'Library'),
+              Tab(icon: Icon(Icons.search), text: 'Search'),
+            ],
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _tab,
+              children: [_libraryList(), const LibrarySearchBody()],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The all-songs list with pagination, sorting, and import.
+  Widget _libraryList() {
+    return _loading && _tracks.isEmpty
           ? const Center(child: CircularProgressIndicator())
           : _tracks.isEmpty
               ? EmptyView(
@@ -170,7 +205,6 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
                       },
                     );
                   },
-                ),
-    );
+                );
   }
 }
