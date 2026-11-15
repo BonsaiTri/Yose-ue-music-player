@@ -855,15 +855,16 @@ http://127.0.0.1:$port/c.wav
       expect(result.replaced, 1);
       expect(result.retried, 1);
       expect(result.unresolved, 1);
-      // The dead song's top available version was queued.
+      // The dead song's top available version was queued, and the dead
+      // record itself was removed from history.
       expect(
           (await downloads.queued())
               .any((t) => t.url.contains('watch?v=$altId')),
           isTrue);
+      expect(await downloads.byId(dead.id), isNull);
       // The transient failure was re-queued in place.
       expect((await downloads.byId(flaky.id))!.status, DownloadTaskStatus.queued);
-      // The dead tasks themselves are untouched.
-      expect((await downloads.byId(dead.id))!.status, DownloadTaskStatus.failed);
+      // The orphan's record stays: no replacement was found for it.
       expect(
           (await downloads.byId(orphan.id))!.status, DownloadTaskStatus.failed);
     } finally {

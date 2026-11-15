@@ -726,6 +726,11 @@ class _SuggestVersionsSheetState extends ConsumerState<_SuggestVersionsSheet> {
                 '“${entry.title}” is already downloaded or in the queue')));
         return;
       }
+      // The dead record is superseded by this new download — drop it so
+      // the history stays clean.
+      try {
+        await ref.read(appDepsProvider).downloader.removeTask(widget.task.id);
+      } catch (_) {}
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('“${entry.title}” queued for download')));
       Navigator.of(context).pop(true);

@@ -751,6 +751,11 @@ class DownloadEngine {
   /// Re-queues a failed, cancelled or paused task.
   Future<void> retry(String id) => downloads.retry(id);
 
+  /// Deletes a task record. Used when a dead task is superseded by a new
+  /// download of an available version — library tracks and files are
+  /// untouched.
+  Future<void> removeTask(String id) => downloads.delete(id);
+
   /// Re-queues every failed task in one action, except those whose failure
   /// is permanent (dead or paywalled source video). Returns how many were
   /// retried and how many were skipped. The periodic poll picks them up on
@@ -836,6 +841,11 @@ class DownloadEngine {
           AppLogger.info(
               'rescue: queued "${top.title}" for "${task.title}"',
               tag: 'download');
+          // The dead record is superseded by the replacement — drop it so
+          // the history stays clean. Failing to drop it is harmless.
+          try {
+            await downloads.delete(task.id);
+          } catch (_) {}
         } else {
           unresolved++;
         }

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.23 (2026-11-15)
+
+### Improved
+- **Cleaned-up history after replacements.** When a dead download is
+  replaced by an available version (bulk "fix all failed" or the per-task
+  "Suggest an available version" action), the old failure record is
+  removed from History — only the new download (and its result) remains.
+  Records with no available version found stay in place.
+
 ## 0.3.22 (2026-11-15)
 
 ### Added

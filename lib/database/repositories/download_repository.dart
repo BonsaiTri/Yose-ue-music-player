@@ -187,6 +187,12 @@ class DownloadRepository {
     return stmt.go();
   }
 
+  /// Deletes a single task record (library tracks and files are untouched).
+  Future<void> delete(String id) async {
+    final stmt = db.delete(db.downloadTasks)..where((t) => t.id.equals(id));
+    await stmt.go();
+  }
+
   /// Re-queues a failed, cancelled or paused task.
   Future<void> retry(String id) async {
     final task = await byId(id);
