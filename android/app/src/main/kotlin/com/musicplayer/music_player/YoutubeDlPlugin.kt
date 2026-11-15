@@ -100,11 +100,13 @@ class YoutubeDlPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 }
                 Thread {
                     try {
+                        Log.i(TAG, "list: $url")
                         val request = YoutubeDLRequest(url)
                             .addOption("--dump-json")
                             .addOption("--flat-playlist")
                             .addOption("--ignore-errors")
                         val response = YoutubeDL.execute(request, null, null)
+                        Log.i(TAG, "list ok: ${response.out.length} chars")
                         result.success(response.out)
                     } catch (t: Throwable) {
                         Log.e(TAG, "yt-dlp list failed", t)

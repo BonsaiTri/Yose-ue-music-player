@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.7 (2026-11-15)
+
+### Added
+- **Downloads screen revamp.**
+  - **Link and YouTube are now tabs** — switch between pasting a direct
+    link/M3U/YouTube URL and searching YouTube from one screen.
+  - **After you queue a download, the screen returns to the queue/history**
+    so you can immediately see your task's progress.
+- **Search diagnostics** — the YouTube search flow now logs each step
+  (query, raw output size, parsed entry count, failures) to make issues
+  easier to diagnose.
+
 ## 0.3.6 (2026-11-15)
 
 ### Added

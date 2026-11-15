@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 
 import 'package:music_player/app/bootstrap.dart';
 import 'package:music_player/database/database.dart';
+import 'package:music_player/core/logging/app_logger.dart';
 import 'package:music_player/features/downloader/domain/download_engine.dart';
 import 'package:music_player/features/downloader/domain/yt_dlp.dart';
 import 'package:music_player/features/downloader/domain/youtube_resolver.dart';
@@ -32,9 +33,13 @@ class DownloadsScreen extends ConsumerStatefulWidget {
   ConsumerState<DownloadsScreen> createState() => _DownloadsScreenState();
 }
 
-class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
+class _DownloadsScreenState extends ConsumerState<DownloadsScreen>
+    with SingleTickerProviderStateMixin {
   final TextEditingController _urlController = TextEditingController();
   final TextEditingController _searchController = TextEditingController();
+  late final TabController _tabController;
+  final GlobalKey _linkListAnchor = GlobalKey();
+  final GlobalKey _ytListAnchor = GlobalKey();
   bool _adding = false;
   bool _searching = false;
   List<YtDlpEntry> _searchResults = const [];
@@ -47,6 +52,7 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(vsync: this, length: 2);
     _load();
     // Live updates: the engine persists progress to the database, and this
     // stream is re-emitted on every change.
@@ -64,7 +70,19 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
     _activeSub?.cancel();
     _urlController.dispose();
     _searchController.dispose();
+    _tabController.dispose();
     super.dispose();
+  }
+
+  /// After a successful queue, scroll the current tab's list so the
+  /// queue/history is visible again.
+  void _returnToQueue() {
+    if (!mounted) return;
+    final anchor = _tabController.index == 0 ? _linkListAnchor : _ytListAnchor;
+    final ctx = anchor.currentContext;
+    if (ctx == null) return;
+    Scrollable.ensureVisible(ctx,
+        alignment: 0.0, duration: const Duration(milliseconds: 300));
   }
 
   /// Searches YouTube (via yt-dlp's `ytsearch` extractor) and shows the
@@ -72,6 +90,7 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
   Future<void> _searchYouTube() async {
     final q = _searchController.text.trim();
     if (q.isEmpty || _searching) return;
+    AppLogger.info('YT search tapped: "$q"', tag: 'download');
     setState(() {
       _searching = true;
       _searchResults = const [];
@@ -80,9 +99,11 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
       final results =
           await ref.read(appDepsProvider).downloader.searchYouTube(q);
       if (!mounted) return;
+      AppLogger.info('YT search done: ${results.length} results', tag: 'download');
       setState(() => _searchResults = results);
       if (results.isEmpty) _showSnack('No YouTube results found.');
     } catch (e) {
+      AppLogger.error('YT search failed: $e', tag: 'download');
       _showSnack('YouTube search failed: $e');
     } finally {
       if (mounted) setState(() => _searching = false);
@@ -123,6 +144,7 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
   }
 
   Future<void> _queueSearchResult(YtDlpEntry entry) async {
+    AppLogger.info('YT search result tapped: "${entry.title}"', tag: 'download');
     try {
       final summary =
           await ref.read(appDepsProvider).downloader.queueYouTube(entry.watchUrl);
@@ -130,6 +152,7 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
           ? '“${entry.title}” queued for download'
           : 'Queued ${summary.queued} tracks');
       await _load();
+      _returnToQueue();
     } on AlreadyDownloadedError catch (e) {
       _showSnack(e.message);
     } on AlreadyInQueueError catch (e) {
@@ -198,6 +221,7 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
       }
       _urlController.clear();
       await _load();
+      _returnToQueue();
     } on AlreadyDownloadedError catch (e) {
       _showSnack(e.message);
     } on AlreadyInQueueError catch (e) {
@@ -254,73 +278,135 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
       ),
       body: Column(
         children: [
-          _addForm(),
-          _addFormHint(),
-          _searchSection(),
+          TabBar(
+            controller: _tabController,
+            tabs: const [
+              Tab(icon: Icon(Icons.link), text: 'Link'),
+              Tab(icon: Icon(Icons.search), text: 'YouTube'),
+            ],
+          ),
           Expanded(
-            child: _active.isEmpty &&
-                    _queued.isEmpty &&
-                    _paused.isEmpty &&
-                    _history.isEmpty
-                ? const Center(
-                    child: Text(
-                        'No download tasks yet.\nAdd media to the download queue to make it available offline.'),
-                  )
-                : ListView(
-                    children: [
-                      if (_active.isNotEmpty) ...[
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
-                    child: Text('In progress',
-                        style: TextStyle(fontWeight: FontWeight.bold)),
-                  ),
-                  for (final task in _active)
-                    _taskTile(task, deps, inFlight: true),
-                ],
-                if (_queued.isNotEmpty) ...[
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
-                    child: Text('Queue',
-                        style: TextStyle(fontWeight: FontWeight.bold)),
-                  ),
-                  for (final task in _queued)
-                    _taskTile(task, deps, cancellable: true),
-                ],
-                if (_paused.isNotEmpty) ...[
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
-                    child: Text('Paused',
-                        style: TextStyle(fontWeight: FontWeight.bold)),
-                  ),
-                  for (final task in _paused)
-                    _taskTile(task, deps, cancellable: true),
-                ],
-                      if (_history.isNotEmpty) ...[
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 12, 4, 4),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Text('History',
-                                    style:
-                                        const TextStyle(fontWeight: FontWeight.bold)),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.delete_sweep),
-                                tooltip: 'Clear history',
-                                onPressed: _confirmClearHistory,
-                              ),
-                            ],
-                          ),
-                        ),
-                        for (final task in _history) _taskTile(task, deps),
-                      ],
-                    ],
-                  ),
+            child: TabBarView(
+              controller: _tabController,
+              children: [_linkTab(deps), _youtubeTab(deps)],
+            ),
           ),
         ],
       ),
     );
+  }
+
+  /// "Link" tab: paste a track/playlist/YouTube URL and queue it.
+  Widget _linkTab(dynamic deps) {
+    return ListView(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      children: [
+        _addForm(),
+        _addFormHint(),
+        SizedBox(key: _linkListAnchor),
+        ..._taskList(deps),
+      ],
+    );
+  }
+
+  /// "YouTube" tab: search and tap a result to queue it.
+  Widget _youtubeTab(dynamic deps) {
+    return ListView(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      children: [
+        _searchForm(),
+        if (_searchResults.isNotEmpty)
+          for (final e in _searchResults)
+            ListTile(
+              leading: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: _SearchThumb(url: e.thumbnail),
+              ),
+              title: Text(e.title,
+                  maxLines: 1, overflow: TextOverflow.ellipsis),
+              subtitle: Text(e.channel ?? 'YouTube',
+                  style: const TextStyle(fontSize: 11)),
+              onTap: () => _queueSearchResult(e),
+              trailing: IconButton(
+                icon: const Icon(Icons.download),
+                tooltip: 'Queue for download',
+                onPressed: () => _queueSearchResult(e),
+              ),
+            ),
+        if (_searchResults.isNotEmpty)
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
+            child: Text(
+                'Tap a result (or the download icon) to queue it.',
+                style: TextStyle(fontSize: 11)),
+          ),
+        SizedBox(key: _ytListAnchor),
+        ..._taskList(deps),
+      ],
+    );
+  }
+
+  /// The shared in-progress / queue / paused / history sections, or the
+  /// empty-state message.
+  List<Widget> _taskList(dynamic deps) {
+    if (_active.isEmpty &&
+        _queued.isEmpty &&
+        _paused.isEmpty &&
+        _history.isEmpty) {
+      return const [
+        Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+              'No download tasks yet.\nAdd media to the download queue to make it available offline.'),
+        ),
+      ];
+    }
+    return [
+      if (_active.isNotEmpty) ...[
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
+          child: Text('In progress',
+              style: TextStyle(fontWeight: FontWeight.bold)),
+        ),
+        for (final task in _active) _taskTile(task, deps, inFlight: true),
+      ],
+      if (_queued.isNotEmpty) ...[
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
+          child: Text('Queue',
+              style: TextStyle(fontWeight: FontWeight.bold)),
+        ),
+        for (final task in _queued) _taskTile(task, deps, cancellable: true),
+      ],
+      if (_paused.isNotEmpty) ...[
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
+          child: Text('Paused',
+              style: TextStyle(fontWeight: FontWeight.bold)),
+        ),
+        for (final task in _paused) _taskTile(task, deps, cancellable: true),
+      ],
+      if (_history.isNotEmpty) ...[
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 4, 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text('History',
+                    style:
+                        const TextStyle(fontWeight: FontWeight.bold)),
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete_sweep),
+                tooltip: 'Clear history',
+                onPressed: _confirmClearHistory,
+              ),
+            ],
+          ),
+        ),
+        for (final task in _history) _taskTile(task, deps),
+      ],
+    ];
   }
 
   Widget _addForm() {
@@ -356,66 +442,36 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
     );
   }
 
-  /// YouTube search: type a query, tap a result to queue it.
-  Widget _searchSection() {
+  /// YouTube search input row (results are rendered in the tab list).
+  Widget _searchForm() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _searchController,
-                  decoration: const InputDecoration(
-                    labelText: 'Search YouTube',
-                    hintText: 'Artist, song, or channel…',
-                    prefixIcon: Icon(Icons.search),
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  onSubmitted: (_) => _searchYouTube(),
-                ),
+          Expanded(
+            child: TextField(
+              controller: _searchController,
+              decoration: const InputDecoration(
+                labelText: 'Search YouTube',
+                hintText: 'Artist, song, or channel…',
+                prefixIcon: Icon(Icons.search),
+                border: OutlineInputBorder(),
+                isDense: true,
               ),
-              const SizedBox(width: 8),
-              FilledButton.tonalIcon(
-                icon: _searching
-                    ? const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.search),
-                label: const Text('Search'),
-                onPressed: _searching ? null : _searchYouTube,
-              ),
-            ],
-          ),
-          if (_searchResults.isNotEmpty)
-            for (final e in _searchResults)
-              ListTile(
-                leading: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: _SearchThumb(url: e.thumbnail),
-                ),
-                title: Text(e.title,
-                    maxLines: 1, overflow: TextOverflow.ellipsis),
-                subtitle: Text(e.channel ?? 'YouTube',
-                    style: const TextStyle(fontSize: 11)),
-                onTap: () => _queueSearchResult(e),
-                trailing: IconButton(
-                  icon: const Icon(Icons.download),
-                  tooltip: 'Queue for download',
-                  onPressed: () => _queueSearchResult(e),
-                ),
-              ),
-          if (_searchResults.isNotEmpty)
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
-              child: Text(
-                  'Tap a result (or the download icon) to queue it.',
-                  style: TextStyle(fontSize: 11)),
+              onSubmitted: (_) => _searchYouTube(),
             ),
+          ),
+          const SizedBox(width: 8),
+          FilledButton.tonalIcon(
+            icon: _searching
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.search),
+            label: const Text('Search'),
+            onPressed: _searching ? null : _searchYouTube,
+          ),
         ],
       ),
     );

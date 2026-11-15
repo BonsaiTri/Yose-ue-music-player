@@ -228,10 +228,15 @@ class AndroidYtDlp implements YtDlpBackend {
     await ensureReady();
     try {
       final out = await _channel.invokeMethod<String>('list', {'url': url});
+      AppLogger.info('yt-dlp list "$url": raw ${out?.length ?? 0} chars',
+          tag: 'yt-dlp');
       if (out == null || out.isEmpty) {
         throw const YtDlpException('YouTube returned no entries');
       }
-      return parseYtDlpListing(out);
+      final entries = parseYtDlpListing(out);
+      AppLogger.info('yt-dlp list "$url": parsed ${entries.length} entries',
+          tag: 'yt-dlp');
+      return entries;
     } on PlatformException catch (e) {
       throw YtDlpException(_cleanMessage(e));
     }
