@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.22 (2026-11-15)
+
+### Added
+- **"Fix all failed downloads" bulk action.** The History section in
+  Downloads now has a fix-it-all button (magic wand) that, in one tap:
+  - re-queues transient failures (network errors, timeouts) for a plain
+    retry, and
+  - for every dead video (removed / private / Premium-only), searches
+    YouTube and automatically queues the **top available version** of the
+    same song for download.
+  It reports the outcome, e.g. "queued 12 available versions — retried 3 —
+  27 had no available version".
+
 ## 0.3.21 (2026-11-15)
 
 ### Added

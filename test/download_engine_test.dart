@@ -796,6 +796,81 @@ http://127.0.0.1:$port/c.wav
     }
   });
 
+  test('rescueFailed replaces dead videos, retries transient ones',
+      () async {
+    const deadId = 'DEADDEADDE1';
+    const altId = 'ALTONE12345';
+    const orphanId = 'ZZZZZZZZZZ9';
+    final dead = await downloads.create(
+        url: 'https://www.youtube.com/watch?v=$deadId',
+        title: 'Neon Waves (Official Video)',
+        artist: 'Wave Rider');
+    await downloads.updateStatus(
+        dead.id,
+        DownloadTaskStatus.failed,
+        error: 'ERROR: [youtube] $deadId: Video unavailable. This video is '
+            'not available');
+    final orphan = await downloads.create(
+        url: 'https://www.youtube.com/watch?v=$orphanId',
+        title: 'Gone Track',
+        artist: 'Nobody');
+    await downloads.updateStatus(
+        orphan.id,
+        DownloadTaskStatus.failed,
+        error: 'ERROR: [youtube] $orphanId: Video unavailable. This video '
+            'is not available');
+    final flaky =
+        await downloads.create(url: 'http://x/flaky.wav', title: 'Flaky');
+    await downloads
+        .updateStatus(flaky.id, DownloadTaskStatus.failed, error: 'timeout');
+
+    List<YtDlpEntry> fakeList(String url) {
+      if (url.startsWith('ytsearch')) {
+        if (url.toLowerCase().contains('neon waves')) {
+          return const [
+            // The dead video still shows up in search; it must be dropped.
+            YtDlpEntry(
+                id: 'DEADDEADDE1',
+                title: 'Neon Waves (Official Video)'),
+            YtDlpEntry(id: 'ALTONE12345', title: 'Neon Waves',
+                channel: 'Wave Rider'),
+          ];
+        }
+        return const []; // "gone track" has no other versions.
+      }
+      if (url.contains('watch?v=$altId')) {
+        return const [
+          YtDlpEntry(id: 'ALTONE12345', title: 'Neon Waves',
+              channel: 'Wave Rider')
+        ];
+      }
+      return const [];
+    }
+
+    final fake = _FakeYtDlp(listFn: fakeList);
+    final engine = DownloadEngine(
+        downloads: downloads, files: files, importer: importer, ytDlp: fake);
+    try {
+      final result = await engine.rescueFailed();
+      expect(result.replaced, 1);
+      expect(result.retried, 1);
+      expect(result.unresolved, 1);
+      // The dead song's top available version was queued.
+      expect(
+          (await downloads.queued())
+              .any((t) => t.url.contains('watch?v=$altId')),
+          isTrue);
+      // The transient failure was re-queued in place.
+      expect((await downloads.byId(flaky.id))!.status, DownloadTaskStatus.queued);
+      // The dead tasks themselves are untouched.
+      expect((await downloads.byId(dead.id))!.status, DownloadTaskStatus.failed);
+      expect(
+          (await downloads.byId(orphan.id))!.status, DownloadTaskStatus.failed);
+    } finally {
+      await engine.stop();
+    }
+  });
+
   test('clearHistory removes only finished records, keeps queued tasks',
       () async {
     final kept = await downloads.create(
@@ -1149,12 +1224,19 @@ http://127.0.0.1:$port/c.wav
 /// Fake yt-dlp backend for engine tests: no network, deterministic output.
 class _FakeYtDlp implements YtDlpBackend {
   _FakeYtDlp(
-      {this.entries, this.errorMessage, this.fileBytes, this.titleResult});
+      {this.entries,
+      this.errorMessage,
+      this.fileBytes,
+      this.titleResult,
+      this.listFn});
 
   final List<YtDlpEntry>? entries;
   final String? errorMessage;
   final List<int>? fileBytes;
   final String? titleResult;
+
+  /// Per-URL override for [list] (search vs. specific watch URL).
+  final List<YtDlpEntry> Function(String url)? listFn;
   final calls = <String>[];
 
   @override
@@ -1164,6 +1246,7 @@ class _FakeYtDlp implements YtDlpBackend {
   Future<List<YtDlpEntry>> list(String url) async {
     calls.add('list $url');
     if (errorMessage != null) throw YtDlpException(errorMessage!);
+    if (listFn != null) return listFn!(url);
     return entries ?? const [];
   }
 

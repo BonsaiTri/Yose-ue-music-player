@@ -95,6 +95,24 @@ class RetryFailedResult {
   final int skipped;
 }
 
+/// Result of [DownloadEngine.rescueFailed]: transient failures were
+/// re-queued as-is, dead videos were replaced by a queued copy of the top
+/// available version, and the rest had no available version found.
+class RescueSummary {
+  const RescueSummary(
+      {required this.retried, required this.replaced, required this.unresolved});
+
+  /// Failed tasks whose error is transient, re-queued for a plain retry.
+  final int retried;
+
+  /// Dead videos whose top available version was queued for download.
+  final int replaced;
+
+  /// Failed tasks that could not be fixed (no version found, not a
+  /// YouTube source, or already in the library).
+  final int unresolved;
+}
+
 /// One parsed entry of an M3U/M3U8 playlist.
 class _M3uEntry {
   const _M3uEntry(this.url, this.title, this.artist);
@@ -772,6 +790,70 @@ class DownloadEngine {
     if (error == null) return false;
     final e = error.toLowerCase();
     return permanentFailureMarkers.any((m) => e.contains(m));
+  }
+
+  /// Fixes every failed task in one action:
+  ///
+  /// * Transient failures (network errors, timeouts) are re-queued for a
+  ///   plain retry.
+  /// * Dead videos (removed, private, Premium-only) are searched on
+  ///   YouTube and the top available version of the same song is queued
+  ///   for download.
+  ///
+  /// Searches run sequentially (one per dead task), so a large batch may
+  /// take a couple of minutes. Returns what happened overall.
+  Future<RescueSummary> rescueFailed() async {
+    final failed = await downloads.failed();
+    var retried = 0;
+    var replaced = 0;
+    var unresolved = 0;
+    for (final task in failed) {
+      if (!isPermanentFailure(task.error)) {
+        try {
+          await downloads.retry(task.id);
+          retried++;
+        } catch (_) {
+          unresolved++;
+        }
+        continue;
+      }
+      List<YtDlpEntry>? alts;
+      try {
+        alts = await suggestAlternatives(task.id);
+      } catch (e) {
+        AppLogger.warning('rescue search failed for ${task.id}: $e',
+            tag: 'download');
+      }
+      if (alts == null || alts.isEmpty) {
+        unresolved++;
+        continue;
+      }
+      final top = alts.first;
+      try {
+        final summary = await queueYouTube(top.watchUrl);
+        if (summary.queued >= 1) {
+          replaced++;
+          AppLogger.info(
+              'rescue: queued "${top.title}" for "${task.title}"',
+              tag: 'download');
+        } else {
+          unresolved++;
+        }
+      } on AlreadyDownloadedError {
+        // The song is already in the library — nothing to do.
+        unresolved++;
+      } on AlreadyInQueueError {
+        unresolved++;
+      } catch (e) {
+        AppLogger.warning('rescue failed for ${task.id}: $e', tag: 'download');
+        unresolved++;
+      }
+    }
+    AppLogger.info(
+        'rescue done: $replaced replaced, $retried retried, $unresolved unresolved',
+        tag: 'download');
+    return RescueSummary(
+        retried: retried, replaced: replaced, unresolved: unresolved);
   }
 
   void _tick() {

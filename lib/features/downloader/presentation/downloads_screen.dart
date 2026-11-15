@@ -110,6 +110,34 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen>
     }
   }
 
+  /// Fixes every failed download in one action: transient failures are
+  /// re-queued, and dead videos are replaced by their top available
+  /// version on YouTube.
+  Future<void> _rescueFailed() async {
+    setState(() => _adding = true);
+    try {
+      final result = await ref.read(appDepsProvider).downloader.rescueFailed();
+      await _load();
+      final parts = <String>[];
+      if (result.replaced > 0) {
+        parts.add('queued ${result.replaced} available version' +
+            (result.replaced == 1 ? '' : 's'));
+      }
+      if (result.retried > 0) {
+        parts.add('retried ${result.retried}');
+      }
+      if (result.unresolved > 0) {
+        parts.add('${result.unresolved} had no available version');
+      }
+      _showSnack(
+          parts.isEmpty ? 'No failed downloads to fix' : parts.join(' — '));
+    } catch (e) {
+      _showSnack('Could not process failed downloads: $e');
+    } finally {
+      if (mounted) setState(() => _adding = false);
+    }
+  }
+
   /// Re-queues every failed download in one action. Permanently dead
   /// videos (removed or Premium-only sources) are skipped and reported.
   Future<void> _retryAllFailed() async {
@@ -439,6 +467,14 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen>
                   icon: const Icon(Icons.replay),
                   tooltip: 'Retry all failed downloads',
                   onPressed: _retryAllFailed,
+                ),
+              if (_history.any((t) =>
+                  t.status == DownloadTaskStatus.failed &&
+                  DownloadEngine.isPermanentFailure(t.error)))
+                IconButton(
+                  icon: const Icon(Icons.auto_fix_high),
+                  tooltip: 'Download an available version of every failed song',
+                  onPressed: _rescueFailed,
                 ),
               IconButton(
                 icon: const Icon(Icons.delete_sweep),
