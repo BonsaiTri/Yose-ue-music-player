@@ -122,6 +122,22 @@ class YouTubeResolver {
   }
 
   /// 34-char playlist id (`PL…`), or null.
+  /// Canonical URL for duplicate detection: YouTube watch URLs become
+  /// `https://www.youtube.com/watch?v=<id>` and playlists
+  /// `https://www.youtube.com/playlist?list=<id>`, so format variants
+  /// (`youtu.be`, extra query parameters, `music.youtube.com`) compare
+  /// equal. Any other URL passes through trimmed.
+  static String canonicalUrl(String url) {
+    final trimmed = url.trim();
+    final video = videoIdFromUrl(trimmed);
+    if (video != null) return 'https://www.youtube.com/watch?v=$video';
+    final playlist = playlistIdFromUrl(trimmed);
+    if (playlist != null) {
+      return 'https://www.youtube.com/playlist?list=$playlist';
+    }
+    return trimmed;
+  }
+
   static String? playlistIdFromUrl(String url) {
     final uri = Uri.tryParse(url);
     if (uri == null || !isYouTubeUrl(url)) return null;

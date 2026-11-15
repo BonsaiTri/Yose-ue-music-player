@@ -62,6 +62,15 @@ class DownloadRepository {
       (db.select(db.downloadTasks)..where((t) => t.id.equals(id))).getSingleOrNull();
 
   /// The most recent completed task with exactly [url], if any.
+  /// All tasks whose status is in [statuses], newest first. Used for
+  /// duplicate detection, where the stored URL may be a format variant of
+  /// the queried URL and must be compared in canonical form in memory.
+  Future<List<DownloadTask>> byStatuses(List<DownloadTaskStatus> statuses) =>
+      (db.select(db.downloadTasks)
+          ..where((t) => t.status.isInValues(statuses))
+          ..orderBy([(t) => OrderingTerm.desc(t.updatedAt)]))
+          .get();
+
   Future<DownloadTask?> completedByUrl(String url) =>
       (db.select(db.downloadTasks)
           ..where((t) =>

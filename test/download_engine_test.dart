@@ -8,7 +8,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:drift/drift.dart' show driftRuntimeOptions;
+import 'package:drift/drift.dart' show Value, driftRuntimeOptions;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
@@ -775,6 +775,57 @@ http://127.0.0.1:$port/c.wav
     } finally {
       await eng.stop();
     }
+  });
+
+  test('queue refuses a URL format variant of a completed download',
+      () async {
+    final doneFile = File(p.join(temp.path, 'variant.m4a'))..createSync();
+    final done = await downloads.create(
+        url: 'https://www.youtube.com/watch?v=ccccccccccc',
+        title: 'Variant Song');
+    await downloads.updateStatus(done.id, DownloadTaskStatus.completed,
+        finalPath: doneFile.path);
+    await expectLater(
+        engine.queue(url: 'https://youtu.be/ccccccccccc', title: 'Variant Song'),
+        throwsA(isA<AlreadyDownloadedError>()));
+  });
+
+  test('queue refuses a different upload of a song already in the library',
+      () async {
+    await db.into(db.tracks).insert(TracksCompanion(
+      id: Value('t1'),
+      title: Value('Sunset Drive'),
+      artist: Value('Neon Waves'),
+      filePath: Value('/nonexistent/sunset.m4a'),
+      fileFormat: Value('m4a'),
+      dateAdded: Value(DateTime(2026, 1, 1)),
+      dateModified: Value(DateTime(2026, 1, 1)),
+    ));
+    await expectLater(
+        engine.queue(
+          url: 'https://www.youtube.com/watch?v=ddddddddddd',
+          title: 'Sunset Drive (Official Video)',
+          artist: 'Neon Waves',
+        ),
+        throwsA(isA<AlreadyDownloadedError>()));
+  });
+
+  test('queue allows the same title from a different artist', () async {
+    await db.into(db.tracks).insert(TracksCompanion(
+      id: Value('t2'),
+      title: Value('Same Name'),
+      artist: Value('Artist A'),
+      filePath: Value('/nonexistent/same.m4a'),
+      fileFormat: Value('m4a'),
+      dateAdded: Value(DateTime(2026, 1, 1)),
+      dateModified: Value(DateTime(2026, 1, 1)),
+    ));
+    final task = await engine.queue(
+      url: 'https://www.youtube.com/watch?v=eeeeeeeeeee',
+      title: 'Same Name',
+      artist: 'Artist B',
+    );
+    expect(task.status, DownloadTaskStatus.queued);
   });
 
   test('YouTube single video already downloaded is refused clearly', () async {

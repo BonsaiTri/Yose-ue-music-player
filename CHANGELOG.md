@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.18 (2026-11-15)
+
+### Fixed
+- **Duplicate downloads were still slipping through.** The old check
+  compared exact URL strings, so the same video in a different format
+  (`youtu.be/…`, extra parameters) or a *different upload* of a song you
+  already own was downloaded again. Duplicate detection now:
+  - compares YouTube URLs in canonical form (video id / playlist id), and
+  - checks the library by song title + artist (titles normalized, so
+    "Song (Official Video)" matches "Song").
+
+  Already-owned songs are now refused with a clear message, and playlist
+  downloads skip them.
+
 ## 0.3.17 (2026-11-15)
 
 ### Fixed

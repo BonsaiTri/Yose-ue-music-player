@@ -263,7 +263,7 @@ class DownloadEngine {
     int priority = 0,
   }) async {
     _validateUrl(url);
-    await _ensureNotDuplicate(url, title: title);
+    await _ensureNotDuplicate(url, title: title, artist: artist);
     return downloads.create(
       url: url,
       title: title,
@@ -274,19 +274,83 @@ class DownloadEngine {
     );
   }
 
-  /// Refuses to enqueue [url] when it is already present:
+  /// Refuses to enqueue [url] when the music is already present:
   ///
-  /// * [AlreadyInQueueError] — a queued/active/paused task uses the URL,
+  /// * [AlreadyInQueueError] — a queued/active/paused task uses the same
+  ///   source,
   /// * [AlreadyDownloadedError] — a completed task used it and the file or
   ///   library track is still present (a completed task whose file was
-  ///   deleted is *not* a duplicate — re-downloading is correct).
-  Future<void> _ensureNotDuplicate(String url, {String? title}) async {
-    final open = await downloads.openByUrl(url);
-    if (open != null) throw AlreadyInQueueError(title ?? open.title);
-    final done = await downloads.completedByUrl(url);
-    if (done != null && await _stillInLibrary(done)) {
-      throw AlreadyDownloadedError(title ?? done.title);
+  ///   deleted is *not* a duplicate — re-downloading is correct), or a track
+  ///   with the same title and artist is already in the library (a
+  ///   different upload of a song the user already owns).
+  ///
+  /// YouTube URLs are compared in canonical form so format variants
+  /// (`youtu.be`, extra query parameters) still match.
+  Future<void> _ensureNotDuplicate(
+    String url, {
+    String? title,
+    String? artist,
+  }) async {
+    final canonical = YouTubeResolver.canonicalUrl(url);
+    final tasks = await downloads.byStatuses(const [
+      DownloadTaskStatus.queued,
+      DownloadTaskStatus.preparing,
+      DownloadTaskStatus.downloading,
+      DownloadTaskStatus.processing,
+      DownloadTaskStatus.validating,
+      DownloadTaskStatus.paused,
+      DownloadTaskStatus.completed,
+    ]);
+    for (final task in tasks) {
+      if (YouTubeResolver.canonicalUrl(task.url) != canonical) continue;
+      if (task.status == DownloadTaskStatus.completed) {
+        if (await _stillInLibrary(task)) {
+          throw AlreadyDownloadedError(title ?? task.title);
+        }
+      } else {
+        throw AlreadyInQueueError(title ?? task.title);
+      }
     }
+    if (title != null && await _inLibrary(title, artist)) {
+      throw AlreadyDownloadedError(title);
+    }
+  }
+
+  /// True when the library already holds a track matching [title] — and
+  /// [artist] when both are known. Titles are compared in normalized form
+  /// (lowercase, punctuation-free, trailing parentheticals like
+  /// "(official music video)" stripped) so different uploads of the same
+  /// song match.
+  Future<bool> _inLibrary(String title, String? artist) async {
+    final wantTitle = _songKey(title);
+    if (wantTitle.isEmpty) return false;
+    final wantArtist = _songKey(artist ?? '');
+    for (final track in await importer.tracks.allTracks()) {
+      if (_songKey(track.title) != wantTitle) continue;
+      final trackArtist = _songKey(track.artist);
+      if (wantArtist.isEmpty ||
+          trackArtist.isEmpty ||
+          trackArtist == wantArtist) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Normalized comparison key for song titles/artists.
+  static String _songKey(String raw) {
+    var s = raw.trim().toLowerCase();
+    // Strip a short trailing parenthetical/bracket suffix, e.g.
+    // "(official music video)", "(live)".
+    final close = s.lastIndexOf(RegExp(r'[)\]]'));
+    if (close >= 1 && close == s.length - 1) {
+      final openParen = s.lastIndexOf('(', close);
+      final openBracket = s.lastIndexOf('[', close);
+      final openAt = openParen > openBracket ? openParen : openBracket;
+      if (openAt > 0 && close - openAt <= 40) s = s.substring(0, openAt);
+    }
+    s = s.replaceAll(RegExp(r'[^a-z0-9 ]'), '');
+    return s.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
   /// True when a completed task's music is still reachable: its library
@@ -333,7 +397,7 @@ class DownloadEngine {
     var already = 0;
     for (final entry in entries) {
       try {
-        await _ensureNotDuplicate(entry.url, title: entry.title);
+        await _ensureNotDuplicate(entry.url, title: entry.title, artist: entry.artist);
       } on AlreadyDownloadedError {
         already++;
         continue;
@@ -395,7 +459,9 @@ class DownloadEngine {
       var already = 0;
       for (final entry in entries.take(_maxPlaylistEntries)) {
         try {
-          await _ensureNotDuplicate(entry.watchUrl, title: entry.title);
+          await _ensureNotDuplicate(entry.watchUrl,
+              title: entry.title,
+              artist: entry.channel);
         } on AlreadyDownloadedError {
           already++;
           continue;
