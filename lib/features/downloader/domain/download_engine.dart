@@ -145,8 +145,50 @@ class DownloadEngine {
   Future<void> start() async {
     if (_started) return;
     _started = true;
+    await _recoverOrphaned();
     _poll = Timer.periodic(_pollInterval, (_) => _tick());
     await _tickAsync();
+  }
+
+  /// Re-queue tasks that were mid-flight when the app was killed or
+  /// crashed, and delete the temp files those dead runs left behind.
+  /// Without this, tasks stuck in preparing/downloading/processing/
+  /// validating would never run again and their temp data would leak.
+  Future<void> _recoverOrphaned() async {
+    try {
+      var recovered = 0;
+      for (final status in <DownloadTaskStatus>[
+        DownloadTaskStatus.preparing,
+        DownloadTaskStatus.downloading,
+        DownloadTaskStatus.processing,
+        DownloadTaskStatus.validating,
+      ]) {
+        for (final task in await downloads.byStatus(status)) {
+          await downloads.updateStatus(task.id, DownloadTaskStatus.queued);
+          recovered++;
+        }
+      }
+      final tmp = Directory(files.tempDir);
+      if (await tmp.exists()) {
+        for (final entity in tmp.listSync()) {
+          try {
+            if (entity is File) {
+              await entity.delete();
+            } else if (entity is Directory) {
+              await entity.delete(recursive: true);
+            }
+          } catch (_) {
+            // Best-effort cleanup; never block startup on a stale temp file.
+          }
+        }
+      }
+      if (recovered > 0) {
+        AppLogger.info('Recovered $recovered interrupted download(s)',
+            tag: 'download');
+      }
+    } catch (e) {
+      AppLogger.warning('Download recovery failed: $e', tag: 'download');
+    }
   }
 
   Future<void> stop() async {

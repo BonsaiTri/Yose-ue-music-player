@@ -498,7 +498,11 @@ class _HomePageState extends ConsumerState<_HomePage> {
       (Icons.history_outlined, 'History', null, Page.history),
       (Icons.storage_outlined, 'Storage', null, Page.storage),
     ];
+    // shrinkWrap keeps this grid's main axis bounded: it lives inside the
+    // home page's vertical ListView, and an unbounded scrollable there can
+    // end up with an infinite scroll offset ("Infinity or NaN toInt").
     return GridView.count(
+      shrinkWrap: true,
       crossAxisCount: isWide ? 4 : 2,
       mainAxisExtent: isWide ? 96 : 104,
       mainAxisSpacing: 12,

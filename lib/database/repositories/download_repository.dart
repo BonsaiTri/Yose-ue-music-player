@@ -19,6 +19,12 @@ class DownloadRepository {
             ])))
       .watch();
 
+  /// All tasks currently in [status].
+  Future<List<DownloadTask>> byStatus(DownloadTaskStatus status) =>
+      (db.select(db.downloadTasks)
+          ..where((t) => t.status.equalsValue(status)))
+          .get();
+
   Future<List<DownloadTask>> queued({int limit = 50}) =>
       (db.select(db.downloadTasks)
           ..where((t) => t.status.equalsValue(DownloadTaskStatus.queued))

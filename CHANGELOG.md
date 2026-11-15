@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.16 (2026-11-15)
+
+### Fixed
+- **Home page could crash with “Infinity or NaN toInt”.** The browse grid
+  inside the home page's scroll view had an unbounded main axis; it is now
+  shrink-wrapped so its scroll offset can never go out of range.
+
+### Added
+- **Interrupted downloads recover automatically.** Tasks that were
+  mid-download when the app was closed or crashed are re-queued on next
+  start (and their leftover temp files are cleaned up) instead of being
+  stuck “in progress” forever.
+
 ## 0.3.15 (2026-11-15)
 
 ### Added
