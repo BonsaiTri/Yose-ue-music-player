@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.12 (2026-11-15)
+
+### Added
+- **Previous-track button in the mini player.** The mini player bar now has
+  previous / play-pause / next, matching the full Now Playing screen.
+
 ## 0.3.11 (2026-11-15)
 
 ### Fixed

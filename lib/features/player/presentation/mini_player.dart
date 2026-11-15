@@ -76,6 +76,10 @@ class _MiniPlayerState extends ConsumerState<MiniPlayer> {
                     ),
                   ),
                   IconButton(
+                    icon: const Icon(Icons.skip_previous),
+                    onPressed: _player.playPrevious,
+                  ),
+                  IconButton(
                     icon: Icon(_playing ? Icons.pause : Icons.play_arrow),
                     onPressed: () => _player.togglePlayPause(),
                   ),
