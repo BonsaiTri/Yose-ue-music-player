@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  audio_service resolves its control icons at runtime via
+  getResources().getIdentifier(name, "drawable", packageName). That
+  reflection is invisible to the resource shrinker, so AGP 9's release
+  resource shrinking strips these drawables from the APK — the lookup
+  returns 0 and building the media notification throws
+  "You must specify an icon resource id to build a CustomAction",
+  silently killing the lock screen controls.
+  Declaring them public keeps them in the APK.
+-->
+<resources>
+    <public type="drawable" name="audio_service_play_arrow"/>
+    <public type="drawable" name="audio_service_pause"/>
+    <public type="drawable" name="audio_service_skip_next"/>
+    <public type="drawable" name="audio_service_skip_previous"/>
+    <public type="drawable" name="audio_service_fast_forward"/>
+    <public type="drawable" name="audio_service_fast_rewind"/>
+    <public type="drawable" name="audio_service_stop"/>
+</resources>

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.11 (2026-11-15)
+
+### Fixed
+- **Lock screen controls still missing (second root cause).** AGP 9's release
+  resource shrinking was stripping the `audio_service` control icons from
+  the APK because they are only referenced at runtime (invisible to the
+  shrinker). The icon lookup returned 0 and Android threw
+  "You must specify an icon resource id", silently killing the media
+  notification. The icons are now declared as public resources so they
+  survive the build.
+
 ## 0.3.10 (2026-11-15)
 
 ### Fixed

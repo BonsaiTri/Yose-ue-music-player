@@ -41,6 +41,13 @@ android {
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = true
+            // audio_service resolves its media-notification icons at runtime
+            // via getResources().getIdentifier(...); the resource shrinker
+            // can't see that reference and strips the drawables, so Android
+            // throws "You must specify an icon resource id" and the lock
+            // screen controls silently disappear. (Size impact negligible —
+            // the APK is dominated by the bundled yt-dlp asset.)
+            isShrinkResources = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 file("proguard-rules.pro")
