@@ -5,7 +5,7 @@ class AppConstants {
   static const String appName = 'Yose-ue Music Player';
 
   /// Displayed in Settings → About; keep in sync with `pubspec.yaml`.
-  static const String appVersion = '0.3.12';
+  static const String appVersion = '0.3.13';
   static const String databaseFileName = 'music_player.sqlite';
 
   /// Storage layout relative to the application data root.

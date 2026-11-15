@@ -242,8 +242,11 @@ Future<ProviderContainer> bootstrap() async {
     locks: locks,
     db: db,
   );
-  final player =
-      PlaybackController(stateDir: files.databaseDir, tracksRepo: tracks);
+  final player = PlaybackController(
+    stateDir: files.databaseDir,
+    tracksRepo: tracks,
+    artworkPathFor: artwork.absolutePathFor,
+  );
   await player.init();
   await player.restore();
 

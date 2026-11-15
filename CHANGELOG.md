@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.13 (2026-11-15)
+
+### Added
+- **Album art on the lock screen.** The media notification now shows the
+  current track's artwork as its large icon (resolved from the library's
+  stored artwork files; falls back to the app icon when a track has none).
+
 ## 0.3.12 (2026-11-15)
 
 ### Added

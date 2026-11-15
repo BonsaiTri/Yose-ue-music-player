@@ -64,6 +64,10 @@ class PlaybackHandler extends BaseAudioHandler {
 
   final AudioPlayer player;
 
+  /// Resolves an artwork id (library `artworkRef`) to an absolute file
+  /// path, used as the media notification's large icon (lock screen art).
+  Future<String?> Function(String?)? artworkPathFor;
+
   /// The library queue currently loaded (owned by PlaybackController).
   List<Track> libraryQueue = [];
 
@@ -143,24 +147,39 @@ class PlaybackHandler extends BaseAudioHandler {
     }
   }
 
-  void _publishItem() {
+  Future<void> _publishItem() async {
     final track = currentTrack;
-    mediaItem.value = track == null
-        ? null
-        : MediaItem(
-            id: track.id,
-            title: track.title,
-            artist: track.artist,
-            album: track.album,
-            duration: track.durationMs > 0
-                ? Duration(milliseconds: track.durationMs)
-                : null,
-          );
+    if (track == null) {
+      mediaItem.value = null;
+      queue.value = const [];
+      queueTitle.value = '';
+      return;
+    }
+    // Best-effort: a missing artwork file must never break publishing the
+    // media item (the notification just falls back to the app icon).
+    String? artPath;
+    final resolver = artworkPathFor;
+    if (resolver != null) {
+      try {
+        artPath = await resolver(track.artworkRef);
+      } catch (_) {
+        artPath = null;
+      }
+    }
+    mediaItem.value = MediaItem(
+      id: track.id,
+      title: track.title,
+      artist: track.artist,
+      album: track.album,
+      duration:
+          track.durationMs > 0 ? Duration(milliseconds: track.durationMs) : null,
+      artUri: artPath == null ? null : Uri.file(artPath),
+    );
     queue.value = [
       for (final t in libraryQueue)
         MediaItem(id: t.id, title: t.title, artist: t.artist)
     ];
-    queueTitle.value = track?.album ?? '';
+    queueTitle.value = track.album;
   }
 
   // -- transport ---------------------------------------------------------
@@ -255,11 +274,19 @@ class PlaybackHandler extends BaseAudioHandler {
 /// Queue, shuffle and repeat are delegated to just_audio's
 /// ConcatenatingAudioSource; position persistence survives restarts.
 class PlaybackController {
-  PlaybackController({required String stateDir, required this.tracksRepo})
+  PlaybackController(
+      {required String stateDir,
+      required this.tracksRepo,
+      this.artworkPathFor})
       : _stateFile = File('$stateDir/playback_state.json'),
-        _handler = PlaybackHandler(AudioPlayer());
+        _handler = PlaybackHandler(AudioPlayer()) {
+    _handler.artworkPathFor = artworkPathFor;
+  }
 
   final TrackRepository tracksRepo;
+
+  /// Artwork id -> absolute path resolver (lock screen art).
+  final Future<String?> Function(String?)? artworkPathFor;
   final File _stateFile;
   final PlaybackHandler _handler;
 
