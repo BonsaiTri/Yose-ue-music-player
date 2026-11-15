@@ -191,6 +191,18 @@ class YoutubeDlPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 )
             }
 
+            "guard_start" -> {
+                val appCtx = context
+                result.success(appCtx != null).also {
+                    if (appCtx != null) DownloadGuardService.start(appCtx)
+                }
+            }
+
+            "guard_stop" -> {
+                context?.let { DownloadGuardService.stop(it) }
+                result.success(true)
+            }
+
             else -> result.notImplemented()
         }
     }

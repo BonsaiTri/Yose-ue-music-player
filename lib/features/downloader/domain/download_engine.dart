@@ -31,6 +31,16 @@ class _Paused implements Exception {
   const _Paused();
 }
 
+/// Keeps the OS from killing the process while downloads run in the
+/// background. Android implements this with a foreground service (a
+/// backgrounded app's worker child processes are prime low-memory-killer
+/// targets); desktop platforms no-op.
+abstract class DownloadProcessGuard {
+  Future<void> start();
+
+  Future<void> stop();
+}
+
 class DownloadTaskException implements Exception {
   const DownloadTaskException(this.message);
   final String message;
@@ -108,6 +118,7 @@ class DownloadEngine {
     this.concurrency = AppConstants.maxConcurrentDownloads,
     this.ytDlp,
     this.playlists,
+    this.guard,
   });
 
   final DownloadRepository downloads;
@@ -123,6 +134,11 @@ class DownloadEngine {
   /// grouped into an app playlist named after the source, and finished
   /// tracks are added to it automatically.
   final PlaylistRepository? playlists;
+
+  /// Background-process protection (Android foreground service). Started
+  /// while tasks are running, stopped when the queue drains.
+  final DownloadProcessGuard? guard;
+  bool _guardActive = false;
 
   static const _pollInterval = Duration(seconds: 2);
   static const _progressFlush = Duration(milliseconds: 500);
@@ -197,7 +213,44 @@ class DownloadEngine {
     _started = false;
     _client?.close(force: true);
     _client = null;
+    if (_guardActive) {
+      _guardActive = false;
+      try {
+        await guard?.stop();
+      } catch (_) {
+        // Best-effort; the service stops itself with the process.
+      }
+    }
     ytDlp?.close();
+  }
+
+  /// Starts the background guard once real work is running.
+  Future<void> _ensureGuardActive() async {
+    if (_guardActive || _running.isEmpty) return;
+    _guardActive = true;
+    try {
+      await guard?.start();
+    } catch (e) {
+      AppLogger.warning('Download guard start failed: $e', tag: 'download');
+    }
+  }
+
+  /// Stops the background guard once nothing is running and nothing is
+  /// queued, so the notification goes away when work is done.
+  Future<void> _maybeStopGuard() async {
+    if (!_guardActive || _running.isNotEmpty) return;
+    try {
+      final remaining = await downloads.queued(limit: 1);
+      if (remaining.isNotEmpty) return;
+    } catch (_) {
+      return;
+    }
+    _guardActive = false;
+    try {
+      await guard?.stop();
+    } catch (e) {
+      AppLogger.warning('Download guard stop failed: $e', tag: 'download');
+    }
   }
 
   /// Enqueues a new download (source of truth is the database).
@@ -584,6 +637,7 @@ class DownloadEngine {
   }
 
   Future<void> _tickAsync() async {
+    await _ensureGuardActive();
     final slots = concurrency - _running.length;
     if (slots <= 0) return;
     final batch = await downloads.queued(limit: slots);
@@ -740,6 +794,7 @@ class DownloadEngine {
       _cancelled.remove(id);
       _paused.remove(id);
       _ytProgressClock.remove(id);
+      await _maybeStopGuard();
     }
   }
 

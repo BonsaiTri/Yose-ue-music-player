@@ -10,6 +10,9 @@
          mediaPlayback). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- Download guard: keeps the app and its yt-dlp worker processes
+         alive while downloads run in the background. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <!-- Android 13+: the media notification (lock screen controls) is
          silently dropped without this. Requested at runtime on first play.
          No-op on older Android (auto-granted). -->
@@ -51,6 +54,13 @@
                 <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
+        <!-- Download guard: foreground service of type dataSync. Started
+             from Dart while download tasks are running; keeps the process
+             group safe from the low-memory killer in the background. -->
+        <service
+            android:name=".DownloadGuardService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
         <!-- audio_service: hardware media buttons (headset, car, etc.). -->
         <receiver
             android:name="com.ryanheise.audioservice.MediaButtonReceiver"

@@ -266,6 +266,9 @@ Future<ProviderContainer> bootstrap() async {
     concurrency: maxConcurrent,
     ytDlp: ytDlp,
     playlists: playlists,
+    // Keeps downloads alive in the background (Android foreground
+    // service); no-op on desktop.
+    guard: PlatformInfo.isAndroid ? AndroidDownloadGuard() : null,
   );
   await downloader.start();
 

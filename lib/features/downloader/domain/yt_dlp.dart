@@ -10,6 +10,7 @@ import 'package:path/path.dart' as p;
 
 import 'package:music_player/core/logging/app_logger.dart';
 import 'package:music_player/core/platform/platform_info.dart';
+import 'package:music_player/features/downloader/domain/download_engine.dart';
 
 /// Error from the yt-dlp backend (listing, download, setup).
 class YtDlpException implements Exception {
@@ -90,6 +91,23 @@ abstract class YtDlpBackend {
 
   /// Releases platform resources.
   void close();
+}
+
+/// Keeps the app process alive while downloads run in the background by
+/// starting the native `DownloadGuardService` (foreground service of type
+/// dataSync). Without it, a backgrounded app's yt-dlp worker processes
+/// get reaped by the low-memory killer mid-download.
+class AndroidDownloadGuard implements DownloadProcessGuard {
+  AndroidDownloadGuard({MethodChannel? channel})
+      : _channel = channel ?? const MethodChannel('yose_ue/youtube_dl');
+
+  final MethodChannel _channel;
+
+  @override
+  Future<void> start() => _channel.invokeMethod('guard_start');
+
+  @override
+  Future<void> stop() => _channel.invokeMethod('guard_stop');
 }
 
 /// Picks the right backend for the current platform.

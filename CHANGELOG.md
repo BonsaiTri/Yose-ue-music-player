@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.17 (2026-11-15)
+
+### Fixed
+- **Downloads died when the app went to the background.** Android's
+  low-memory killer was reaping the yt-dlp worker processes while the app
+  was backgrounded. The app now runs a `dataSync` foreground service
+  (with a small “Downloading tracks…” notification) while downloads are
+  active, keeping the whole process group alive. The notification
+  disappears when the queue finishes.
+
 ## 0.3.16 (2026-11-15)
 
 ### Fixed
