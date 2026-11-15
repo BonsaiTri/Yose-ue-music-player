@@ -85,6 +85,16 @@ class PlaylistQueueSummary {
   final int alreadyDownloaded;
 }
 
+/// Result of [DownloadEngine.retryFailed]: how many tasks were re-queued
+/// and how many were skipped because their failure is permanent (dead or
+/// paywalled source video).
+class RetryFailedResult {
+  const RetryFailedResult(this.retried, this.skipped);
+
+  final int retried;
+  final int skipped;
+}
+
 /// One parsed entry of an M3U/M3U8 playlist.
 class _M3uEntry {
   const _M3uEntry(this.url, this.title, this.artist);
@@ -674,15 +684,45 @@ class DownloadEngine {
   /// Re-queues a failed, cancelled or paused task.
   Future<void> retry(String id) => downloads.retry(id);
 
-  /// Re-queues every failed task in one action. Returns how many were
-  /// retried (0 when there is nothing to retry). The periodic poll picks
-  /// them up on its own.
-  Future<int> retryFailed() async {
+  /// Re-queues every failed task in one action, except those whose failure
+  /// is permanent (dead or paywalled source video). Returns how many were
+  /// retried and how many were skipped. The periodic poll picks them up on
+  /// its own.
+  Future<RetryFailedResult> retryFailed() async {
     final failed = await downloads.failed();
+    var retried = 0;
+    var skipped = 0;
     for (final task in failed) {
+      if (isPermanentFailure(task.error)) {
+        skipped++;
+        continue;
+      }
       await downloads.retry(task.id);
+      retried++;
     }
-    return failed.length;
+    return RetryFailedResult(retried, skipped);
+  }
+
+  /// yt-dlp failure markers that will never succeed on retry: the source
+  /// video is gone, private, or paywalled.
+  static const List<String> permanentFailureMarkers = [
+    'video unavailable',
+    'isn\'t available',
+    'not available',
+    'only available to',
+    'private video',
+    'removed by the uploader',
+    'removed for copyright',
+    'removed this video',
+    'join this channel',
+  ];
+
+  /// True when a task's stored [error] describes a failure that retrying
+  /// will not fix (the source video itself is dead or paywalled).
+  static bool isPermanentFailure(String? error) {
+    if (error == null) return false;
+    final e = error.toLowerCase();
+    return permanentFailureMarkers.any((m) => e.contains(m));
   }
 
   void _tick() {

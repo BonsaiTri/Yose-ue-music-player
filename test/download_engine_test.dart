@@ -249,8 +249,9 @@ void main() {
     // A completed task must not be touched by a bulk retry.
     await downloads.updateStatus(t3.id, DownloadTaskStatus.completed);
 
-    final retried = await engine.retryFailed();
-    expect(retried, 2);
+    final result = await engine.retryFailed();
+    expect(result.retried, 2);
+    expect(result.skipped, 0);
     expect((await downloads.byId(t1.id))!.status, DownloadTaskStatus.queued);
     expect((await downloads.byId(t2.id))!.status, DownloadTaskStatus.queued);
     expect((await downloads.byId(t3.id))!.status, DownloadTaskStatus.completed);
@@ -258,7 +259,49 @@ void main() {
     expect((await downloads.byId(t1.id))!.error, isNull);
     expect((await downloads.byId(t1.id))!.progress, 0);
     // A second bulk retry finds nothing left to retry.
-    expect(await engine.retryFailed(), 0);
+    final second = await engine.retryFailed();
+    expect(second.retried, 0);
+    expect(second.skipped, 0);
+  });
+
+  test('retryFailed skips permanently dead videos', () async {
+    final dead = await downloads.create(url: 'http://x/dead.wav', title: 'Dead');
+    final flaky =
+        await downloads.create(url: 'http://x/flaky.wav', title: 'Flaky');
+    await downloads.updateStatus(
+        dead.id,
+        DownloadTaskStatus.failed,
+        error: 'ERROR: [youtube] abcDEFGhijk: Video unavailable. This video '
+            'is not available');
+    await downloads
+        .updateStatus(flaky.id, DownloadTaskStatus.failed, error: 'boom');
+
+    final result = await engine.retryFailed();
+    expect(result.retried, 1);
+    expect(result.skipped, 1);
+    // The dead video stays failed; the flaky one is re-queued.
+    expect((await downloads.byId(dead.id))!.status, DownloadTaskStatus.failed);
+    expect((await downloads.byId(flaky.id))!.status, DownloadTaskStatus.queued);
+  });
+
+  test('isPermanentFailure classifies yt-dlp error strings', () {
+    expect(
+        DownloadEngine.isPermanentFailure(
+            'ERROR: [youtube] x: Video unavailable. This video is not available'),
+        isTrue);
+    expect(
+        DownloadEngine.isPermanentFailure(
+            'ERROR: [youtube] x: This video is only available to Music Premium members'),
+        isTrue);
+    expect(DownloadEngine.isPermanentFailure(
+        'ERROR: [youtube] x: Private video. Sign in to confirm you follow the channel'),
+        isTrue);
+    expect(
+        DownloadEngine.isPermanentFailure(
+            'ERROR: [youtube] x: Unable to extract YouTube Music info'),
+        isFalse);
+    expect(DownloadEngine.isPermanentFailure('socket timeout'), isFalse);
+    expect(DownloadEngine.isPermanentFailure(null), isFalse);
   });
 
   test('cancel while downloading stops the transfer and cleans up', () async {

@@ -110,16 +110,25 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen>
     }
   }
 
-  /// Re-queues every failed download in one action.
+  /// Re-queues every failed download in one action. Permanently dead
+  /// videos (removed or Premium-only sources) are skipped and reported.
   Future<void> _retryAllFailed() async {
     setState(() => _adding = true);
     try {
-      final count =
+      final result =
           await ref.read(appDepsProvider).downloader.retryFailed();
       await _load();
-      _showSnack(count > 0
-          ? 'Retried $count failed download${count == 1 ? '' : 's'}'
-          : 'No failed downloads to retry');
+      final parts = <String>[];
+      if (result.retried > 0) {
+        parts.add('Retried ${result.retried} failed download' +
+            (result.retried == 1 ? '' : 's'));
+      }
+      if (result.skipped > 0) {
+        parts.add('skipped ${result.skipped} dead video' +
+            (result.skipped == 1 ? '' : 's') +
+            ' (source removed or Premium-only)');
+      }
+      _showSnack(parts.isEmpty ? 'No failed downloads to retry' : parts.join(' — '));
     } catch (e) {
       _showSnack('Could not retry failed downloads: $e');
     } finally {
@@ -540,7 +549,12 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen>
                 '${task.progress == 0 ? '' : '${(task.progress * 100).round()}% · '}${bytes > 0 ? _fmtBytes(bytes) : 'preparing'}${status == DownloadTaskStatus.downloading && speed > 0 ? ' · ${_fmtBytes(speed)}/s' : ''}',
                 style: const TextStyle(fontSize: 11)),
           if (task.error != null)
-            Text(task.error!, style: const TextStyle(color: Colors.red, fontSize: 11)),
+            Text(
+              DownloadEngine.isPermanentFailure(task.error)
+                  ? '${task.error!} · dead source, will not be retried'
+                  : task.error!,
+              style: const TextStyle(color: Colors.red, fontSize: 11),
+            ),
           if (!inFlight &&
               status == DownloadTaskStatus.queued &&
               bytes > 0)

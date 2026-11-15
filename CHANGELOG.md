@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.20 (2026-11-15)
+
+### Improved
+- **Failed downloads that can never succeed are now recognized.**
+  "Retry all failed" previously re-ran dead videos (removed/privated) and
+  Premium-only videos over and over. Those failures are now classified as
+  permanent: bulk retry skips them and reports the skip count ("Retried 3
+  failed downloads — skipped 41 dead videos"), and the History list marks
+  them with "dead source, will not be retried".
+
+### Notes
+- The usual batch of failing downloads is on YouTube's side: most are
+  removed/privated videos ("Video unavailable") and occasional
+  YouTube Music Premium exclusives. Nothing the app can do about those.
+
 ## 0.3.19 (2026-11-15)
 
 ### Added
